@@ -215,7 +215,10 @@ const ali = {
       method: 'POST', headers: ali.headers(cred, ctx.token),
       body: JSON.stringify({ share_id: ctx.shareId, file_id: file.id, expire_sec: 14400 }),
     });
-    if (!r.data || !r.data.download_url) throw new Error(fmtErr('取直链失败', r.data));
+    if (!r.data || !r.data.download_url) {
+      if (!cred.aliAuth) throw new Error('阿里现在要求登录才能取下载直链，匿名只能看目录。请在下方「② 我的凭证」里填上你的阿里 Authorization（获取方法见凭证区说明），再点取链。');
+      throw new Error(fmtErr('取直链失败', r.data));
+    }
     return {
       url: r.data.download_url, name: file.name,
       headers: { Referer: 'https://www.aliyundrive.com/' },
