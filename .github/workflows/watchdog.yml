@@ -1,0 +1,29 @@
+name: watchdog
+
+# 看门狗：每天巡检线上站点与各家接口（跑在本仓库的 GitHub Actions 上，不依赖任何个人账号/服务）。
+# 能机械修的自己修：只改 functions/api/parse.js 里 CONFIG 区的蓝奏镜像与 123 路线，
+# 修完提交并触发 deploy 工作流上线；其余异常开/更新一个 watchdog 标签的 Issue 留痕。
+# 站点地址默认 https://<仓库名>.pages.dev；自有域名可在 Secrets 配 SITE_URL 覆盖。
+on:
+  schedule:
+    - cron: '23 0 * * *'   # UTC 00:23 ≈ 北京时间 08:23
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 巡检与自愈
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+        run: python scripts/watchdog.py
