@@ -1,0 +1,26 @@
+name: deploy
+
+# 推送到 main 或手动触发时，把站点部署到 Cloudflare Pages。
+# 需在仓库 Settings → Secrets 添加 CLOUDFLARE_API_TOKEN 与 CLOUDFLARE_ACCOUNT_ID；
+# 没配令牌时部署步自动跳过（Fork 用户可改用 Pages 连 Git 的方式部署，不受影响）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 推送部署到 Cloudflare Pages（仅当配了部署令牌）
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        run: |
+          mkdir -p dist/functions
+          cp index.html _headers dist/
+          cp -r functions/. dist/functions/
+          npx -y wrangler@3 pages deploy dist --project-name ym-pan --branch main --commit-dirty=true
