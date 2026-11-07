@@ -61,6 +61,9 @@
 | 迅雷 xunlei | `xluser-ssl.xunlei.com/v1/shield/captcha/init` 换 `x-captcha-token` → `api-pan.xunlei.com/drive/v1/share`(/detail) | Authorization 可选 | captcha/init 不直发令牌 = 触发人工验证，已知难点 |
 | 光鸭 guangya | — | — | 筹备中：官方分享接口未公开（设备授权流），不要编假接口 |
 
+
+**夸克扫码（functions/api/qr.js）**：二维码内容 = `https://su.quark.cn/4_eMHBJ?token=…&client_id=532&ssb=weblogin&uc_param_str=&uc_biz_str=S%3Acustom%7COPT%3ASAREA%400%7COPT%3AIMMERSIVE%401%7COPT%3ABACK_BTN_STYLE%400`——**ssb=weblogin 与 uc_biz_str 缺一不可**：ssb 为空时夸克 App 一扫就报「登录请求已过期」，与真过期一模一样，极易误诊（2026-11-07 站长两次扫码失败皆因此）。令牌 getTokenForQrcodeLogin（status 2000000、data.members.token）；轮询 getServiceTicketByQrcodeToken：50004001 等待、50004002 过期、出现 service_ticket 为成功，再走 account/info?st= 换 Cookie、drive-pc config 验活。格式核对自 xiaoya-alist 的 quark_cookie.py。
+
 ### 视频口径速查（functions/api/video.js，改版时对照 MediaGet、ucmao/media-parser、jiuhunwl/short_videos）
 
 - **抖音**：iesdouyin 分享页（移动 UA）→ `window._ROUTER_DATA`（转义形态，提取器已处理去转义）→ `videoInfoRes.item_list[0]`；去水印 `/playwm/`→`/play/` + `ratio=720p`→`1080p`。失效特征：无 `_ROUTER_DATA` 或 item_list 空。
