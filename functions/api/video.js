@@ -25,7 +25,7 @@ status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Con
 });
 const fail = (error, extra = {}) => json({ ok: false, error,...extra});
 
-async function fetchText(url, { ua = UA_DESKTOP, headers = {}, method = 'GET', body, redirect = 'follow', timeout = 15000} = {}) {
+async function fetchText(url, { ua = UA_DESKTOP, headers = {}, method = 'GET', body, redirect = 'follow', timeout = 25000} = {}) {
 const ctl = new AbortController();
 const t = setTimeout(() => ctl.abort(), timeout);
 try {
@@ -85,86 +85,128 @@ const first = (arr) => (Array.isArray(arr) && arr.length? arr[0]: '');
 const dewatermarkDouyin = (u) => u? u.replace('/playwm/', '/play/').replace('ratio=720p', 'ratio=1080p'): u;
 
 /* ---------------- 抖音 ---------------- */
-async function parseDouyin(rawUrl) {
-let url = rawUrl, id = '', kind = 'video';
-let m = url.match(/\/(video|note)\/(\d+)/);
-if (m) { kind = m[1]; id = m[2];}
-else {
-const { finalUrl} = await fetchText(url, { ua: UA_MOBILE});
-url = finalUrl;
-m = url.match(/\/(video|note)\/(\d+)/);
-if (m) { kind = m[1]; id = m[2];}
+let ttwidCache = { v: '', at: 0 };
+async function douyinTtwid() {
+if (ttwidCache.v && Date.now() - ttwidCache.at < 12 * 3600 * 1000) return ttwidCache.v;
+try {
+const res = await fetch('https://ttwid.bytedance.com/ttwid/union/register/', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA_MOBILE }, body: JSON.stringify({ region: 'cn', aid: 1768, needFid: false, service: 'www.iesdouyin.com', migrate_info: { ticket: '', source: 'node' }, cbUrlProtocol: 'https', union: true }) });
+const cookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+const t = cookies.map(c => c.split(';')[0]).find(c => /^ttwid=/.test(c));
+if (t) { ttwidCache = { v: t, at: Date.now() }; return t; }
+} catch { /* ignore */ }
+return '';
 }
-if (!id) throw new Error('没认出抖音作品（需要 v.douyin.com 短链或 douyin.com/video/ 长链）');
-const pageUrl = `https://www.iesdouyin.com/share/${kind === 'note'? 'note': 'video'}/${id}/`;
-const { text: html} = await fetchText(pageUrl, { ua: UA_MOBILE});
+function douyinItemFromHtml(html) {
 const data = extractJsonAfter(html, 'window._ROUTER_DATA');
-let item = null;
 if (data && data.loaderData) {
 for (const node of Object.values(data.loaderData)) {
 const res = node && node.videoInfoRes;
-if (res && Array.isArray(res.item_list) && res.item_list.length) { item = res.item_list[0]; break;}
+if (res && Array.isArray(res.item_list) && res.item_list.length) return res.item_list[0];
+}
+}
+return null;
+}
+async function parseDouyin(rawUrl) {
+let url = rawUrl, id = '', kind = 'video';
+let m = url.match(/\/(video|note)\/(\d+)/);
+if (m) { kind = m[1]; id = m[2]; }
+else {
+const { finalUrl } = await fetchText(url, { ua: UA_MOBILE });
+url = finalUrl;
+m = url.match(/\/(video|note)\/(\d+)/);
+if (m) { kind = m[1]; id = m[2]; }
+}
+if (!id) throw new Error('没认出抖音作品（需要 v.douyin.com 短链或 douyin.com/video/ 长链）');
+const pageUrl = `https://www.iesdouyin.com/share/${kind === 'note' ? 'note' : 'video'}/${id}/`;
+let item = null, route = '分享页 _ROUTER_DATA';
+{
+const { text: html } = await fetchText(pageUrl, { ua: UA_MOBILE });
+item = douyinItemFromHtml(html);
+}
+if (!item) { // 访客标识 ttwid 解锁路线（数据中心 IP 常先吃验证壳页，拿到 ttwid 后重取）
+const tw = await douyinTtwid();
+if (tw) {
+const { text: html } = await fetchText(pageUrl, { ua: UA_MOBILE, headers: { Cookie: tw } });
+item = douyinItemFromHtml(html);
+if (item) route = '分享页（ttwid 解锁）';
 }
 }
 if (!item) { // 兜底老接口（数据中心 IP 常返回空）
 try {
-const { text} = await fetchText(`https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=${id}`, { ua: UA_MOBILE});
+const { text } = await fetchText(`https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=${id}`, { ua: UA_MOBILE });
 const d = JSON.parse(text);
-if (d.item_list && d.item_list.length) item = d.item_list[0];
-} catch { /* ignore */}
+if (d.item_list && d.item_list.length) { item = d.item_list[0]; route = '老接口 iteminfo'; }
+} catch { /* ignore */ }
 }
-if (!item) throw new Error('抖音没返回作品数据（可能被风控、作品已删或接口降级），稍后再试');
-const base = { platform: 'douyin', title: item.desc || '', author: (item.author && item.author.nickname) || '', route: '分享页 _ROUTER_DATA'};
+if (!item) throw new Error('抖音没返回作品数据：它对服务器 IP 的验证拦截很强（已试分享页、ttwid 解锁、老接口三条路线），这条暂时解不了，换一条或稍后再试');
+const base = { platform: 'douyin', title: item.desc || '', author: (item.author && item.author.nickname) || '', route };
 if (kind === 'note' || (item.images && item.images.length)) {
 const images = (item.images || []).map(im => first(im.download_url_list) || first(im.url_list)).filter(Boolean);
-return {...base, type: 'image', cover: images[0] || '', images, url: images[0] || '', note: `图文共 ${images.length} 张原图`};
+return { ...base, type: 'image', cover: images[0] || '', images, url: images[0] || '', note: `图文共 ${images.length} 张原图` };
 }
 const v = item.video || {};
 const qualities = [];
 const main = dewatermarkDouyin(first((v.play_addr || {}).url_list));
-if (main) qualities.push({ label: '无水印', url: main});
+if (main) qualities.push({ label: '无水印', url: main });
 for (const br of (v.bit_rate || [])) {
 const u = dewatermarkDouyin(first((br.play_addr || {}).url_list));
-if (u &&!qualities.some(q => q.url === u)) qualities.push({ label: br.gear_name || '多码率', url: u});
+if (u && !qualities.some(q => q.url === u)) qualities.push({ label: br.gear_name || '多码率', url: u });
 }
 if (!qualities.length && v.play_addr && v.play_addr.uri) {
-qualities.push({ label: '无水印 1080p', url: `https://www.iesdouyin.com/aweme/v1/play/?video_id=${v.play_addr.uri}&ratio=1080p`});
+qualities.push({ label: '无水印 1080p', url: `https://www.iesdouyin.com/aweme/v1/play/?video_id=${v.play_addr.uri}&ratio=1080p` });
 }
 if (!qualities.length) throw new Error('抖音作品里没找到视频地址');
-return {...base, type: 'video', cover: first((v.cover || {}).url_list) || '', url: qualities[0].url, qualities};
+return { ...base, type: 'video', cover: first((v.cover || {}).url_list) || '', url: qualities[0].url, qualities };
 }
 
 /* ---------------- 快手 ---------------- */
 function jsonUnescape(s) { return s.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\//g, '/').replace(/\\"/g, '"');}
 async function parseKuaishou(rawUrl) {
-let photoId = '';
+let photoId = '', landedUrl = '';
 let m = rawUrl.match(/short-video\/([0-9a-zA-Z_-]+)/) || rawUrl.match(/fw\/photo\/([0-9a-zA-Z_-]+)/);
 if (m) photoId = m[1];
 else {
 const { finalUrl} = await fetchText(rawUrl, { ua: UA_MOBILE});
+landedUrl = finalUrl;
 m = finalUrl.match(/short-video\/([0-9a-zA-Z_-]+)/) || finalUrl.match(/fw\/photo\/([0-9a-zA-Z_-]+)/) || finalUrl.match(/[?&]photoId=([0-9a-zA-Z_-]+)/);
 if (m) photoId = m[1];
 }
 if (!photoId) throw new Error('没认出快手作品（需要 v.kuaishou.com 短链或 short-video 长链）');
-const hosts = ['https://www.kuaishou.com', 'https://m.gifshow.com'];
+const candUrls = [];
+if (landedUrl && landedUrl.includes('/fw/photo/')) candUrls.push(landedUrl);
+candUrls.push(`https://www.kuaishou.com/fw/photo/${photoId}`, `https://m.gifshow.com/fw/photo/${photoId}`);
 let html = '', usedHost = '';
-for (const h of hosts) {
-const r = await fetchText(`${h}/fw/photo/${photoId}`, { ua: UA_MOBILE});
-if (r.text.includes('photoUrl')) { html = r.text; usedHost = h; break;}
+for (const cand of candUrls) {
+let r;
+try { r = await fetchText(cand, { ua: UA_MOBILE}); } catch { continue; }
+const h = cand;
+if (r.text.includes('photoUrl') || r.text.includes('mainMvUrls')) { html = r.text; usedHost = h; break; }
 if (!html) { html = r.text; usedHost = h;}
 }
-const grab = (re) => { const mm = html.match(re); return mm? jsonUnescape(mm[1]): '';};
+const U = jsonUnescape(html);
+const grab = (re) => { const mm = U.match(re); return mm ? mm[1] : ''; };
+const qualities = [];
 const main = grab(/"photoUrl"\s*:\s*"([^"]+)"/) || grab(/"photoH265Url"\s*:\s*"([^"]+)"/);
-if (!main) throw new Error('快手没返回视频地址（可能被风控或作品已删），稍后再试');
-const qualities = [{ label: '无水印原画', url: main}];
+if (main) qualities.push({ label: '无水印原画', url: main });
 const h265 = grab(/"photoH265Url"\s*:\s*"([^"]+)"/);
-if (h265 && h265!== main) qualities.push({ label: 'H265', url: h265});
+if (h265 && h265 !== main) qualities.push({ label: 'H265', url: h265 });
+if (!qualities.length) {
+const idx = U.indexOf('mainMvUrls');
+if (idx >= 0) {
+const seg = U.slice(idx, idx + 8000);
+const urls = [...seg.matchAll(/"url"\s*:\s*"(https:[^"]+?)"/g)].map(x => x[1]).filter(u => u.includes('.mp4'));
+const mine = urls.filter(u => u.includes(photoId));
+const picked = (mine.length ? mine : urls).filter((u, ix, a) => a.indexOf(u) === ix).slice(0, 4);
+picked.forEach((u, ix) => qualities.push({ label: ix === 0 ? '无水印' : '清晰度 ' + (ix + 1), url: u }));
+}
+}
+if (!qualities.length) throw new Error('快手没返回视频地址（可能被风控或作品已删），稍后再试');
 return {
 platform: 'kuaishou', type: 'video',
 title: grab(/"caption"\s*:\s*"([^"]*)"/) || '',
-author: grab(/"userName"\s*:\s*"([^"]*)"/) || grab(/"name"\s*:\s*"([^"]*)"/) || '',
+author: grab(/"userName"\s*:\s*"([^"]*)"/) || '',
 cover: grab(/"coverUrls"\s*:\s*\[\s*\{\s*"url"\s*:\s*"([^"]+)"/) || grab(/"coverUrl"\s*:\s*"([^"]+)"/) || '',
-url: main, qualities, route: `H5 分享页（${usedHost.replace('https://', '')}）`,
+url: qualities[0].url, qualities, route: `H5 分享页（${usedHost.replace('https://', '')}）`,
 };
 }
 
@@ -271,6 +313,8 @@ async function parseXiaohongshu(rawUrl) {
     const { text, finalUrl } = await fetchText(url, { ua: UA_MOBILE });
     url = finalUrl;
     if (/xhslink/.test(url)) { const m = text.match(/<a[^>]+href="([^"]+)"/); if (m) url = m[1].replace(/&amp;/g, '&'); }
+    const om = url.match(/[?&]originalUrl=([^&]+)/);
+    if (om) { try { url = decodeURIComponent(om[1]); } catch { /* ignore */ } }
   }
   const idM = url.match(/\/(?:explore|discovery\/item)\/([0-9a-f]+)/);
   if (!idM) throw new Error('没认出小红书笔记（需要 xhslink 短链或 xiaohongshu.com 笔记链）');
@@ -288,7 +332,10 @@ async function parseXiaohongshu(rawUrl) {
   let note = null;
   try { note = state.noteData && state.noteData.data && state.noteData.data.noteData; } catch { /* ignore */ }
   if (!note) { try { note = state.note && state.note.noteDetailMap && state.note.noteDetailMap[noteId] && state.note.noteDetailMap[noteId].note; } catch { /* ignore */ } }
-  if (!note) throw new Error('小红书笔记数据没找到（页面结构可能改版）');
+  if (!note) {
+if (/sec_server|\/404\//.test(url) || /sec_server/.test(html)) throw new Error('这条小红书链接的分享凭证（xsec_token）已失效或被拦：请在小红书 App 里打开这篇笔记，重新点分享→复制链接，再粘最新链接来解析');
+throw new Error('小红书笔记数据没找到（页面结构可能改版）');
+}
   const base = { platform: 'xiaohongshu', title: note.title || note.desc || '', author: (note.user && note.user.nickname) || '', route: '笔记页 __INITIAL_STATE__' };
   const imageList = note.imageList || [];
   if (note.type === 'video' && note.video) {
@@ -333,6 +380,16 @@ async function parseAcfun(rawUrl) {
 }
 
 /* ---------------- 哔哩哔哩 ---------------- */
+let buvidCache = { v: '', at: 0 };
+async function bilibiliBuvid() {
+  if (buvidCache.v && Date.now() - buvidCache.at < 12 * 3600 * 1000) return buvidCache.v;
+  try {
+    const { text } = await fetchText('https://api.bilibili.com/x/frontend/finger/spi', { ua: UA_DESKTOP });
+    const d = JSON.parse(text);
+    if (d.data && d.data.b_3) { buvidCache = { v: 'buvid3=' + d.data.b_3, at: Date.now() }; return buvidCache.v; }
+  } catch { /* ignore */ }
+  return '';
+}
 async function parseBilibili(rawUrl) {
   let url = rawUrl, bv = '';
   let m = url.match(/(BV[0-9a-zA-Z]{10})/);
@@ -345,22 +402,25 @@ async function parseBilibili(rawUrl) {
   }
   if (!bv) throw new Error('没认出 B 站视频（需要 b23.tv 短链或 bilibili.com/video/BV… 长链）');
   const ref = { Referer: 'https://www.bilibili.com/' };
-  const viewR = await fetchText(`https://api.bilibili.com/x/web-interface/view?bvid=${bv}`, { ua: UA_DESKTOP, headers: ref });
+  const buvid = await bilibiliBuvid();
+  const auth = buvid ? { ...ref, Cookie: buvid } : ref;
+  const viewR = await fetchText(`https://api.bilibili.com/x/web-interface/view?bvid=${bv}`, { ua: UA_DESKTOP, headers: auth });
   let view;
   try { view = JSON.parse(viewR.text); } catch { throw new Error('B 站接口被拦截（返回了网页而不是数据，多半是风控），稍后再试'); }
-  if (!view.data) throw new Error('B 站视频信息获取失败（可能已删或被风控 -352/412），稍后再试');
+  if (view.code === -404) throw new Error('这个 B 站视频不存在或已删除');
+  if (!view.data) throw new Error('B 站视频信息获取失败（可能被风控 -352/412），稍后再试');
   const cid = view.data.cid;
   const base = { platform: 'bilibili', title: view.data.title || '', author: (view.data.owner && view.data.owner.name) || '', cover: view.data.pic || '', needReferer: 'https://www.bilibili.com/' };
   const qualities = [];
   let note = 'B 站直链下载时必须带 Referer（已在下方「链接+请求头」里配好）；未登录最高：单文件 480p / 双流 720p，1080p 需要登录，本站不收你的 B 站账号，如实到此为止。';
   try { // 单文件 mp4（fnval=0）
-    const r = await fetchText(`https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=64&fnval=0`, { ua: UA_DESKTOP, headers: ref });
+    const r = await fetchText(`https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=64&fnval=0`, { ua: UA_DESKTOP, headers: auth });
     const d = JSON.parse(r.text);
     const durl = d.data && d.data.durl && d.data.durl[0];
     if (durl && durl.url) qualities.push({ label: `单文件 MP4（${(d.data.quality === 32 ? '480p' : '标清')}，可直接下载）`, url: durl.url });
   } catch { /* ignore */ }
   try { // DASH 双流（fnval=4048）
-    const r = await fetchText(`https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=80&fnval=4048&fourk=1`, { ua: UA_DESKTOP, headers: ref });
+    const r = await fetchText(`https://api.bilibili.com/x/player/playurl?bvid=${bv}&cid=${cid}&qn=80&fnval=4048&fourk=1`, { ua: UA_DESKTOP, headers: auth });
     const d = JSON.parse(r.text);
     const dash = d.data && d.data.dash;
     if (dash && dash.video && dash.video.length) {
@@ -370,7 +430,7 @@ async function parseBilibili(rawUrl) {
     }
   } catch { /* ignore */ }
   if (!qualities.length) { // 页面 __playinfo__ 兜底
-    const page = await fetchText(`https://www.bilibili.com/video/${bv}`, { ua: UA_DESKTOP, headers: ref });
+    const page = await fetchText(`https://www.bilibili.com/video/${bv}`, { ua: UA_DESKTOP, headers: auth });
     const pi = extractJsonAfter(page.text, 'window.__playinfo__');
     const durl = pi && pi.data && pi.data.durl && pi.data.durl[0];
     if (durl && durl.url) qualities.push({ label: '单文件 MP4（页面路线）', url: durl.url });
