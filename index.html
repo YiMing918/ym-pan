@@ -113,11 +113,39 @@ ol.howto li{margin:3px 0}
   </div>
   <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
     <div style="font-size:14px;margin-bottom:6px">夸克巡检凭证（扫码绑定）<span class="badge" id="qrState">检查中…</span></div>
-    <div class="small">给「真解析自检」用的：用夸克 App 扫一次码，登录 Cookie 会存进本站的 KV（不在仓库里、也不进上面的凭证表）。巡检每天拿它真解析一个固定测试分享，哪天夸克口径变了能第一时间发现并修。它只用于巡检你自己的账号，不给任何访客解析用；失效了重新扫一次即可。</div>
+    <div class="small">给「真解析自检」用的：用夸克 App 扫一次码，登录 Cookie 会存进本站的 KV（不在仓库里、也不进上面的凭证表）。巡检每天拿它真解析一个固定测试分享，哪天夸克口径变了能第一时间发现并修。它平时只用于巡检；你在下方保险箱输对口令后，也会用于你本人的夸克解析（免填 Cookie）。失效了重新扫一次即可。</div>
     <div class="row" style="margin-top:8px"><button class="ghost" id="btnQr">生成扫码二维码</button></div>
     <div id="qrBox" style="display:none;margin-top:10px">
       <canvas id="qrCanvas" width="228" height="228" style="background:#fff;border-radius:10px"></canvas>
       <div class="small" id="qrHint" style="margin-top:6px">用夸克 App 扫一扫…</div>
+    </div>
+  </div>
+  <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+    <div style="font-size:14px;margin-bottom:6px">站长保险箱 <span class="badge" id="ownerState">检查中…</span></div>
+    <div class="small">站长专用：把凭证存进本站的云存储（你自己的 Cloudflare 账号）一次，以后在任何设备上输一次口令就免填解析，用的还是你自己的账号。口令由你自己在这里设置（不经过聊天、不经过任何人），服务器只存口令的哈希；保险箱里的凭证只有带对口令的请求才能调用。夸克若已扫码绑定，连填都不用填。提醒：口令别与别处密码相同；怀疑泄露时在设置窗口期重置口令（重置会清空保险箱，需重新存）。</div>
+    <div id="ownerNoPass" style="display:none;margin-top:8px">
+      <div class="small" id="ownerSetupHint">还没设口令。设置窗口平时是关的（防陌生人抢设），需要时告诉助理「开一下保险箱设置窗口」，30 分钟内回到这里设置。</div>
+      <div class="row" id="ownerSetRow" style="display:none;margin-top:6px">
+        <div class="f1"><input type="password" id="inNewPass" placeholder="设置站长口令（至少 6 位）"></div>
+        <button class="ghost" id="btnSetPass">设置口令</button>
+      </div>
+    </div>
+    <div id="ownerHasPass" style="display:none;margin-top:8px">
+      <div class="row">
+        <div class="f1"><input type="password" id="inOwnerPass" placeholder="输入站长口令，解锁本设备免填"></div>
+        <button class="ghost" id="btnUnlock">解锁</button>
+        <button class="ghost" id="btnLock" style="display:none">锁定</button>
+      </div>
+      <div class="small" id="ownerVaultInfo" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="ghost" id="btnVaultSave">把上面填好的凭证存进保险箱</button>
+        <button class="ghost" id="btnChangePass">改口令</button>
+      </div>
+      <div class="row" id="ownerChangeRow" style="display:none;margin-top:6px">
+        <div class="f1"><input type="password" id="inChangePass" placeholder="新口令（至少 6 位）"></div>
+        <button class="ghost" id="btnDoChangePass">确认改口令</button>
+      </div>
+      <div class="small" id="ownerMsg" style="margin-top:6px"></div>
     </div>
   </div>
   <details>
@@ -262,7 +290,14 @@ function extractFromText(t){
 }
 
 async function api(payload){
-  const r = await fetch('/api/parse', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  const headers = {'Content-Type':'application/json'};
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(op) headers['x-owner-pass'] = op;
+  const r = await fetch('/api/parse', { method:'POST', headers, body: JSON.stringify(payload) });
+  return r.json();
+}
+async function ownerApi(payload){
+  const r = await fetch('/api/owner', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
   return r.json();
 }
 
@@ -273,6 +308,8 @@ function applyCredUpdate(drive, upd){
     saveCredField(key, upd.cookie);
     const inp=$('#cred_'+key); if(inp) inp.value=upd.cookie;
     toast('Cookie 已自动更新（__puus 轮换）');
+    const op = localStorage.getItem('ympan_owner_pass');
+    if(op) ownerApi({ action:'vault', pass:op, drive, cred:{ [key]: upd.cookie } }).catch(()=>{});
   }
 }
 
@@ -457,6 +494,90 @@ $('#btnQr').onclick=async()=>{
   };
   cycle();
 };
+
+/* ===== 站长保险箱 ===== */
+const DRIVE_NAME = Object.fromEntries(DRIVES.map(d=>[d.id,d.name]));
+async function refreshOwner(){
+  try{
+    const r = await fetch('/api/owner?action=status'); const d = await r.json();
+    if(!d.ok) { $('#ownerState').textContent='不可用'; return; }
+    const unlocked = !!localStorage.getItem('ympan_owner_pass');
+    $('#ownerState').textContent = d.hasPass ? (unlocked ? '已解锁' : '已设口令') : '未设口令';
+    $('#ownerState').className = 'badge' + (unlocked ? ' ok' : '');
+    $('#ownerNoPass').style.display = d.hasPass ? 'none' : 'block';
+    $('#ownerHasPass').style.display = d.hasPass ? 'block' : 'none';
+    if(!d.hasPass){
+      $('#ownerSetRow').style.display = d.setupOpen ? 'flex' : 'none';
+      if(d.setupOpen) $('#ownerSetupHint').textContent = '设置窗口已开启（30 分钟内有效），现在就设你的口令：';
+    } else {
+      $('#btnUnlock').style.display = unlocked ? 'none' : '';
+      $('#btnLock').style.display = unlocked ? '' : 'none';
+      $('#inOwnerPass').style.display = unlocked ? 'none' : '';
+      const names = d.vaulted.map(v=>DRIVE_NAME[v]||v);
+      let info = '保险箱里已存：' + (names.length ? names.join('、') : '（暂无）');
+      if(d.quarkBound && !d.vaulted.includes('quark')) info += '；夸克已扫码绑定，自动可用';
+      if(d.vaulted.length){
+        info += '　清除：' + d.vaulted.map(v=>`<a href="javascript:void(0)" data-unvault="${v}">${DRIVE_NAME[v]||v}</a>`).join(' ');
+      }
+      $('#ownerVaultInfo').innerHTML = info;
+      document.querySelectorAll('[data-unvault]').forEach(a=>{ a.onclick = async ()=>{
+        const op = localStorage.getItem('ympan_owner_pass');
+        if(!op) return toast('先解锁再清除');
+        await ownerApi({ action:'unvault', pass:op, drive:a.dataset.unvault });
+        toast('已清除'); refreshOwner();
+      };});
+    }
+  }catch(e){ $('#ownerState').textContent='检查失败'; }
+}
+$('#btnSetPass').onclick = async ()=>{
+  const p = $('#inNewPass').value.trim();
+  if(p.length < 6) return toast('口令至少 6 位');
+  const d = await ownerApi({ action:'setpass', pass:p });
+  if(!d.ok) return toast(d.error || '设置失败');
+  localStorage.setItem('ympan_owner_pass', p);
+  toast(d.reset ? '口令已重置，保险箱已清空，请重新存凭证' : '口令已设置，本设备已解锁');
+  refreshOwner();
+};
+$('#btnUnlock').onclick = async ()=>{
+  const p = $('#inOwnerPass').value.trim();
+  if(!p) return toast('先输入口令');
+  const d = await ownerApi({ action:'verify', pass:p });
+  if(!d.ok) return toast('口令不正确');
+  localStorage.setItem('ympan_owner_pass', p);
+  toast('已解锁，本设备解析自动免填');
+  refreshOwner();
+};
+$('#btnLock').onclick = ()=>{ localStorage.removeItem('ympan_owner_pass'); toast('已锁定'); refreshOwner(); };
+$('#btnVaultSave').onclick = async ()=>{
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(!op) return toast('先解锁再存');
+  const byDrive = {};
+  for(const c of CREDS){
+    const v = ($('#cred_'+c.key)?.value || '').trim();
+    if(v) (byDrive[c.drive] = byDrive[c.drive] || {})[c.key] = v;
+  }
+  const drives = Object.keys(byDrive);
+  if(!drives.length) return toast('上面凭证表里没有已填的凭证，先填再存');
+  let okN = 0;
+  for(const dv of drives){
+    const d = await ownerApi({ action:'vault', pass:op, drive:dv, cred:byDrive[dv] });
+    if(d.ok) okN++;
+  }
+  $('#ownerMsg').textContent = `已存进保险箱 ${okN}/${drives.length} 家。`;
+  refreshOwner();
+};
+$('#btnChangePass').onclick = ()=>{ const r=$('#ownerChangeRow'); r.style.display = r.style.display==='none' ? 'flex' : 'none'; };
+$('#btnDoChangePass').onclick = async ()=>{
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(!op) return toast('先解锁');
+  const np = $('#inChangePass').value.trim();
+  if(np.length < 6) return toast('新口令至少 6 位');
+  const d = await ownerApi({ action:'changepass', pass:op, newPass:np });
+  if(!d.ok) return toast(d.error || '改口令失败');
+  localStorage.setItem('ympan_owner_pass', np);
+  toast('口令已更新'); refreshOwner();
+};
+refreshOwner();
 
 $('#btnHealth').onclick=async()=>{
   $('#healthGrid').innerHTML='<div class="small">自检中…</div>';
