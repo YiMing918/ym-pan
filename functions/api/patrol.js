@@ -113,10 +113,19 @@ async function quarkPatrol(kv, url, pwd) {
         });
       } catch { /* ignore */ }
     }
+    // 拿到直链后再验一步：带会话 Cookie 真拉一小段字节，确认链能下而不只是被签发
+    let linkProbe = 'error';
+    try {
+      const pr = await fetch(link, { headers: { Range: 'bytes=0-1023', Cookie: jar.str(), 'User-Agent': UA } });
+      linkProbe = String(pr.status);
+      if ([403, 404, 410].includes(pr.status)) {
+        return { ok: false, stage: 'linkprobe', error: `直链已签发但拉字节被拒（HTTP ${pr.status}），链不可用` };
+      }
+    } catch { /* 网络层异常无法区分，不判死 */ }
     // 回写轮换后的 Cookie
     const fresh = jar.str();
     if (fresh && fresh !== cookie0) await kv.put('quark_cookie', fresh);
-    return { ok: true, stage: 'done', route, files: dd.data.list.length, firstFile: f0.file_name, linkHost: new URL(link).host };
+    return { ok: true, stage: 'done', route, linkProbe, files: dd.data.list.length, firstFile: f0.file_name, linkHost: new URL(link).host };
   } catch (e) {
     return { ok: false, stage, error: `请求异常：${e.message}` };
   }
