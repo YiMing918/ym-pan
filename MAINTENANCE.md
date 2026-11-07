@@ -1,0 +1,89 @@
+# MAINTENANCE.md · 维修与交接手册
+
+## 第一部分：给站长本人（不懂代码也能看懂）
+
+这个站的一切都在**你自己的账号**里：代码在你的 GitHub、站点跑在你的 Cloudflare、域名是你的。它不需要任何人（包括任何 AI）在线才能运行——你平时用它的时候，全程只有你的账号在干活。
+
+你只需要记住三件事：
+
+1. **平时什么都不用管。** 每天有两道自动巡检：仓库里的「看门狗」（GitHub Actions，每天约北京时间 08:23）和站长 AI 侧的巡检（如果还在跑）。域名失效、路线不通这类小毛病，看门狗会自己修好并重新上线。
+2. **想知道坏没坏**，打开仓库的 **Issues** 页：有 `watchdog` 标签的帖子就是巡检报告；或者直接打开站点点「③ 接口自检」。
+3. **真遇到某家网盘解析不了、又想修的时候**，把下面这段话连同仓库地址发给任何一个 AI 助手（或懂技术的人），对方读完本手册就能接手：
+
+> 这是我的网盘解析站仓库：https://github.com/YiMing918/ym-pan 。请先读 MAINTENANCE.md 和 README.md，按手册的排查顺序定位是哪一家网盘的适配器坏了，对照手册里列的上游项目最新口径修复 functions/api/parse.js 里对应那一家，改完跑 node tests/smoke.mjs 验证通过后再提交（仓库会自动部署）。注意：只用我自己账号的凭证、只返回直链不要中转流量、不要把任何个人信息写进仓库。
+
+唯一可能需要你本人动手的情况：夸克巡检 Cookie 失效时，去站点「② 我的凭证」里重新扫一次码（那是你的账号安全验证，别人替不了）。其余都不用你。
+
+---
+
+## 第二部分：给接手维护者（AI 或开发者）
+
+### 文件地图
+
+| 路径 | 作用 |
+|---|---|
+| `index.html` | 前端单页：解析框、文件列表、直链三件套、凭证表单（localStorage）、接口自检、夸克扫码绑定巡检凭证 |
+| `functions/api/parse.js` | 解析层全部逻辑：11 家适配器 + 多路线回退 + 健康检查。顶部 `CONFIG:BEGIN/END` 是易变参数区（蓝奏镜像、123 路线） |
+| `functions/api/qr.js` | 夸克扫码登录：`/api/qr`（发码）、`?action=poll`（轮询换 Cookie 存 KV）、`?action=status` |
+| `functions/api/patrol.js` | 巡检接口：`POST /api/patrol`，需请求头 `x-patrol-key` = 环境变量 `PATROL_KEY`；用 KV 的 `quark_cookie` 对固定测试分享做真解析并回写轮换 Cookie |
+| `scripts/watchdog.py` + `.github/workflows/watchdog.yml` | 仓库看门狗：每日巡检 + CONFIG 区机械自愈 + Issue 留痕 |
+| `.github/workflows/deploy.yml` | 部署：push 到 main 时用 Secrets 里的令牌 wrangler 部署到 Pages（无令牌时自动跳过） |
+| `tests/smoke.mjs` | 打桩冒烟测试：`node tests/smoke.mjs`（Node ≥ 18，无依赖） |
+
+### 部署侧事实（原作者部署，其余部署者按 README）
+
+- Cloudflare Pages 项目名 `ym-pan`；部署令牌与账号 ID 在仓库 Secrets（`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`），fork 不继承。
+- 巡检基础设施（可选）：KV 命名空间绑定变量名 `PAN_KV`；环境变量 `PATROL_KEY`。没配时巡检接口返回「未启用」，不影响解析。
+- 回滚：Pages 控制台 → 部署列表 → 选旧部署「回滚」；或 git revert 后 push。
+
+### 排查顺序（哪家坏了修哪家）
+
+1. 先跑站点 `GET /api/parse?action=health` 看各家官网连通性：不通 = 上游维护/封段，等或看第 4 步。
+2. 再看报错形状：对照下表定位。
+3. 到上游在维护项目取该家最新口径（见「口径来源」），只改 `parse.js` 里对应适配器。
+4. 改完跑 `node tests/smoke.mjs`；涉及真实流程的改动还要部署后用真实分享验（需要站长提供其账号凭证在其浏览器里测，维护者不要索要、不要代持凭证）。
+5. 提交信息写清：`fix(<drive>): <改了什么>`，push 后等 deploy 工作流变绿，再 curl 线上复验。
+
+### 各家口径速查（与 parse.js 一一对应）
+
+| 盘 | 关键端点 | 凭证 | 常见故障签名 → 处理 |
+|---|---|---|---|
+| 百度 baidu | 分享页 HTML（sign/timestamp/shareid）→ `share/verify` → `share/list` → `api/sharedownload` | BDUSS | verify -12 = 页面校验没过（先 GET 分享页拿 PANPSC，本代码已做）；9013 = 当日风控量上限，等次日 |
+| 阿里 aliyun | `v2/share_link/get_share_token` → `adrive/v2/file/list_by_share` → `v2/file/get_share_link_download_url` | 可匿名；Authorization 更稳 | token 失败多为提取码错或分享取消 |
+| 夸克 quark | `drive-pc.quark.cn/1/clouddrive`：`share/sharepage/token` → `share/sharepage/detail` → `file/download`；大文件 `share/sharepage/save` 转存 | 整段 Cookie（`__puus` 会轮换，响应回写 credUpdate） | 41007 = 提取码错；直取失败先查是不是大文件触发转存路线 |
+| UC uc | 同夸克，host 换 `pc-api.uc.cn`、pr=UCBrowser | 整段 Cookie | 同夸克 |
+| 蓝奏 lanzou | 分享页 → iframe 子页 sign → `ajaxm.php?action=downprocess` | 无 | 页面含 `acw_sc__v2`/`arg1=` 且无 iframe = JS 人机挑战，纯接口无解（已知边界，别在这耗）；某域名连不上 = 看门狗会摘镜像 |
+| 移动 cmcc | `share-kd-njs.yun.139.com/.../IOutLink/getOutLinkInfoV6` / `dlFromOutLinkV3` | Authorization 可选 | 实验适配器，字段名变了对照 JxPan 最新代码 |
+| 天翼 ctyun | `cloud.189.cn/api/open/share/getShareInfoByCodeV2.action` → `checkAccessCode` → `open/file/listFiles.action` → `open/file/getFileDownloadUrl.action` | Cookie（取链） | 取链失败多为没登录态 |
+| 小飞机 feijipan | `api.feijipan.com/ws/share/list` → `/ws/file/redirect` | token 可选 | 同上，实验 |
+| 123 pan123 | CONFIG.pan123Bases 两条：`www.123pan.com/api`、`www.123pan.cn/b/api`，`share/list` → `file/download_info` | Authorization（取链） | 5112 = 需登录；两条都连接失败看门狗会报 Issue |
+| 迅雷 xunlei | `xluser-ssl.xunlei.com/v1/shield/captcha/init` 换 `x-captcha-token` → `api-pan.xunlei.com/drive/v1/share`(/detail) | Authorization 可选 | captcha/init 不直发令牌 = 触发人工验证，已知难点 |
+| 光鸭 guangya | — | — | 筹备中：官方分享接口未公开（设备授权流），不要编假接口 |
+
+### 口径来源（改版时对照这些在维护的项目）
+
+- ByLsPro/JxPan `_worker.js`（移动/天翼/小飞机/123/UC/夸克/光鸭的 Workers 口径）
+- hmjz100/LinkSwift（九家，浏览器同源口径，尤其百度 AccessToken 新路线、迅雷、光鸭）
+- yuantuo666/baiduwp（百度历史蓝本，已不活跃，只看逻辑）
+- qaiu/netdisk-fast-download（蓝奏/123/移动口径与限制实测）
+- OpenListTeam/OpenList 与 AList 驱动源码（光鸭、迅雷、阿里开放平台）
+
+### 看门狗规则（scripts/watchdog.py）
+
+- 只允许改 CONFIG 区两个数组：`lanzouMirrors`（连接级死的摘掉、活的排前，至少保留 2 个）、`pan123Bases`（主死备活才交换）。
+- 提交后用 `gh workflow run deploy.yml` 触发部署（GITHUB_TOKEN 的 push 不自动触发其他工作流，这是 GitHub 的规则）。
+- 异常开/更新 `watchdog` 标签 Issue；全恢复自动关闭。
+- **不要扩大它的权限**：不许改 CONFIG 区以外的代码、不许碰凭证逻辑。需要动逻辑的修复走人工/AI 按上面 SOP 做。
+
+### 巡检（真解析自检）
+
+- 站长在页面「② 我的凭证 → 夸克扫码绑定」扫一次码，Cookie 存入 KV `quark_cookie`（扫码接口 `/api/qr`；已绑定时重绑需巡检口令）。
+- 外部巡检（站长 AI 侧 cron）每日调 `POST /api/patrol`（带 `x-patrol-key`）对一个固定测试分享真解析；口令与测试分享不在本仓库（在站长侧保存），fork 部署没有这两样，巡检自然不启用。
+- 巡检返回 `stage=cred` = Cookie 失效，通知站长重扫码；`stage=token/list/download` 失败 = 口径问题，按 SOP 修 parse.js（patrol.js 里是同一套夸克端点的精简副本，修口径时两处一起看）。
+
+### 红线
+
+- 只用访客/站长**自己账号**的凭证；禁止公共账号池。
+- 只返回直链，**禁止代理/中转文件流量**（Cloudflare 条款 + 免费额度）。
+- 仓库禁止出现站长个人信息：域名、邮箱、IP、属地、运营商一律不进；预览图只用示例数据。
+- 英文标识保留原文并配中文备注（站长既定偏好）。
