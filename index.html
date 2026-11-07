@@ -146,6 +146,23 @@ ol.howto li{margin:3px 0}
         <button class="ghost" id="btnDoChangePass">确认改口令</button>
       </div>
       <div class="small" id="ownerMsg" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="ghost" id="btnShowRecoveryReset">忘口令？用恢复码重置</button>
+        <button class="ghost" id="btnRegenRecovery">重新生成恢复码</button>
+      </div>
+      <div id="ownerRecoveryReset" style="display:none;margin-top:6px">
+        <div class="row">
+          <div class="f1"><input type="text" id="inRecovery" placeholder="输入恢复码"></div>
+          <div class="f1"><input type="password" id="inRecoveryPass" placeholder="新口令（至少 6 位）"></div>
+          <button class="ghost" id="btnDoRecoveryReset">重置口令</button>
+        </div>
+        <div class="small" style="margin-top:4px">重置后保险箱会清空（防泄露连带），凭证要重新存一次；同时会签发一串新恢复码。</div>
+      </div>
+    </div>
+    <div id="ownerRecoveryBox" style="display:none;margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:10px">
+      <div class="small">⚠️ 你的恢复码（只显示这一次）：</div>
+      <div class="row" style="margin-top:6px"><code id="ownerRecoveryCode" style="font-size:16px;letter-spacing:1px"></code><button class="ghost" id="btnCopyRecovery">复制</button></div>
+      <div class="small" style="margin-top:4px">请存进手机备忘录或密码本。忘口令时用它重置；谁拿到它谁就能重置，别给任何人。</div>
     </div>
   </div>
   <details>
@@ -529,6 +546,12 @@ async function refreshOwner(){
     }
   }catch(e){ $('#ownerState').textContent='检查失败'; }
 }
+function showRecovery(code){
+  if(!code) return;
+  $('#ownerRecoveryCode').textContent = code;
+  $('#ownerRecoveryBox').style.display = 'block';
+}
+$('#btnCopyRecovery').onclick = ()=>{ navigator.clipboard?.writeText($('#ownerRecoveryCode').textContent); toast('恢复码已复制'); };
 $('#btnSetPass').onclick = async ()=>{
   const p = $('#inNewPass').value.trim();
   if(p.length < 6) return toast('口令至少 6 位');
@@ -536,7 +559,29 @@ $('#btnSetPass').onclick = async ()=>{
   if(!d.ok) return toast(d.error || '设置失败');
   localStorage.setItem('ympan_owner_pass', p);
   toast(d.reset ? '口令已重置，保险箱已清空，请重新存凭证' : '口令已设置，本设备已解锁');
+  showRecovery(d.recovery);
   refreshOwner();
+};
+$('#btnShowRecoveryReset').onclick = ()=>{ const r=$('#ownerRecoveryReset'); r.style.display = r.style.display==='none' ? 'block' : 'none'; };
+$('#btnDoRecoveryReset').onclick = async ()=>{
+  const rec = $('#inRecovery').value.trim();
+  const np = $('#inRecoveryPass').value.trim();
+  if(!rec) return toast('先输入恢复码');
+  if(np.length < 6) return toast('新口令至少 6 位');
+  const d = await ownerApi({ action:'setpass', pass:np, recovery:rec });
+  if(!d.ok) return toast(d.error || '重置失败');
+  localStorage.setItem('ympan_owner_pass', np);
+  toast('口令已重置，保险箱已清空，请重新存凭证');
+  showRecovery(d.recovery);
+  refreshOwner();
+};
+$('#btnRegenRecovery').onclick = async ()=>{
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(!op) return toast('先解锁再重新生成');
+  const d = await ownerApi({ action:'regen-recovery', pass:op });
+  if(!d.ok) return toast(d.error || '生成失败');
+  showRecovery(d.recovery);
+  toast('新恢复码已生成，旧的作废');
 };
 $('#btnUnlock').onclick = async ()=>{
   const p = $('#inOwnerPass').value.trim();
