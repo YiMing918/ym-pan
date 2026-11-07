@@ -23,6 +23,7 @@
 | 路径 | 作用 |
 |---|---|
 | `index.html` | 前端单页：解析框、文件列表、直链三件套、凭证表单（localStorage）、接口自检、夸克扫码绑定巡检凭证 |
+| `functions/api/video.js` | 视频解析：9 平台适配器（抖音/快手/微博/小红书/AcFun/B站主力，TikTok/即梦实验，YouTube 只回嵌入说明） |
 | `functions/api/parse.js` | 解析层全部逻辑：11 家适配器 + 多路线回退 + 健康检查。顶部 `CONFIG:BEGIN/END` 是易变参数区（蓝奏镜像、123 路线） |
 | `functions/api/qr.js` | 夸克扫码登录：`/api/qr`（发码）、`?action=poll`（轮询换 Cookie 存 KV）、`?action=status` |
 | `functions/api/patrol.js` | 巡检接口：`POST /api/patrol`，需请求头 `x-patrol-key` = 环境变量 `PATROL_KEY`；用 KV 的 `quark_cookie` 对固定测试分享做真解析并回写轮换 Cookie |
@@ -59,6 +60,20 @@
 | 123 pan123 | CONFIG.pan123Bases 两条：`www.123pan.com/api`、`www.123pan.cn/b/api`，`share/list` → `file/download_info` | Authorization（取链） | 5112 = 需登录；两条都连接失败看门狗会报 Issue |
 | 迅雷 xunlei | `xluser-ssl.xunlei.com/v1/shield/captcha/init` 换 `x-captcha-token` → `api-pan.xunlei.com/drive/v1/share`(/detail) | Authorization 可选 | captcha/init 不直发令牌 = 触发人工验证，已知难点 |
 | 光鸭 guangya | — | — | 筹备中：官方分享接口未公开（设备授权流），不要编假接口 |
+
+### 视频口径速查（functions/api/video.js，改版时对照 MediaGet、ucmao/media-parser、jiuhunwl/short_videos）
+
+- **抖音**：iesdouyin 分享页（移动 UA）→ `window._ROUTER_DATA`（转义形态，提取器已处理去转义）→ `videoInfoRes.item_list[0]`；去水印 `/playwm/`→`/play/` + `ratio=720p`→`1080p`。失效特征：无 `_ROUTER_DATA` 或 item_list 空。
+- **快手**：`kuaishou.com/fw/photo/{photoId}`（风控换 `m.gifshow.com`）→ 正则抠 `photoUrl/photoH265Url/caption/coverUrls`。失效特征：落登录页/空壳。
+- **微博**：游客凭证 `passport.weibo.com/visitor/genvisitor`→`visitor?a=incarnate` 换 SUB（模块缓存 20 分钟）→ `weibo.com/ajax/statuses/show`（必须 `X-Requested-With`）→ `page_info.media_info.playback_list`（过滤 `meta.type=3` 预览图）；fid 走 `tv/api/component`；降级 `m.weibo.cn/statuses/show`。失效特征：返回 HTML = 凭证失效或丢请求头。
+- **小红书**：xhslink 跟随后保留 `xsec_token`，手机 UA → `window.__INITIAL_STATE__`（undefined→null）→ `noteData.data.noteData` 或 `noteDetailMap`；视频优先 `video.consumer.originVideoKey` 拼 `sns-video-bd.xhscdn.com`，流选型避开 `streamType` 259/309（小程序水印流）。
+- **AcFun**：`window.pageInfo.currentVideoInfo.ksPlayJson` → `adaptationSet[0].representation[]`（m3u8 多档）。
+- **B站**：`x/web-interface/view` 拿 cid → `x/player/playurl`（fnval=0 单文件≈480p；fnval=4048 DASH 游客≈720p）；页面 `__playinfo__` 兜底；CDN 必须带 Referer；-352/412 = 风控。1080p 需登录，本站不收账号、不假装能给。
+- **TikTok**（实验）：网页 SSR `__UNIVERSAL_DATA_FOR_REHYDRATION__` 的 `itemStruct.video.playAddr`（忌用 downloadAddr=水印版）；兜底 `api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id=`。数据中心 IP 常被拦，失败属预期内。
+- **即梦**（实验）：落地页 query 的 id → `share/landing_page` 拿 metadata（注意 download_info.url 是 Logo 水印版）→ POST `mweb/v1/get_item_info` 取 `transcoded_video.origin.video_url`（带 `lr=display_watermark` 的也是水印版）。
+- **YouTube**：服务端基本不可行（机器人墙 + PO Token），只回 embed/watch，不要试图接第三方解析池。
+
+看门狗视频探针（`probe_video`）与网盘探针同理：假链接的可接受报错集合，任一命中即正常；2026-11-07 网盘探针曾因「假 ID 能穿过识别层、上游结构化报错才是健康形状」误报 5 家，已按线上真实报错校准——以后新增探针先拿线上真实报错定集合，别凭适配器文案猜。
 
 ### 口径来源（改版时对照这些在维护的项目）
 
