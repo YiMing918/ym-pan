@@ -81,7 +81,7 @@ def probe_structure():
         ('xunlei', {'drive': 'xunlei', 'action': 'list', 'url': 'https://pan.xunlei.com/s/abcdef', 'cred': {}}, ['验证码令牌', '没认出迅雷分享链接']),
     ]
     for name, payload, expects in cases:
-        st, txt = http(BASE + '/api/parse', method='POST', data=payload, timeout=45)
+        st, txt = http(BASE + '/api/parse', method='POST', data=payload, timeout=60)
         try:
             d = json.loads(txt)
             err = d.get('error', '')
@@ -106,7 +106,7 @@ def probe_video():
         ('jimeng', 'https://jimeng.jianying.com/s/watchdogprobe', None),
     ]
     for name, link, expects in cases:
-        st, txt = http(BASE + '/api/video', method='POST', data={'text': link}, timeout=45)
+        st, txt = http(BASE + '/api/video', method='POST', data={'text': link}, timeout=90)
         try:
             d = json.loads(txt)
             err = d.get('error', '')
