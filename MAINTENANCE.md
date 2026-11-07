@@ -112,3 +112,9 @@
 2. **可用性探针**（真样本、拉字节）：看门狗 probe_usability——抖音/快手/微博/AcFun 用固定公开样本真解析后 Range 拉字节（微博按结果自带的 needReferer 拉）、AcFun 拉清单+首分片；阿里用公开样本验匿名 token→列目录链（取链需凭证，止于列表层）。样本失效与口径变了都会报，靠每日巡检（助理侧）分辨并更换样本。
 3. **真解析巡检**（夸克，带站长凭证）：签发后带会话拉字节（linkProbe），是唯一带凭证的字节级验证；其余需凭证的家（百度/UC/123 等）凭证只在访客浏览器里，自动监测够不着——口径靠结构探针+同系实现兜底。
 新适配器上线标准：必须配一条可用性探针或巡检覆盖，否则只能算「结构通过」。
+
+## 站长保险箱（v1.3）
+- 组件：functions/api/owner.js（status/open-setup/setpass/verify/changepass/vault/unvault）+ parse.js 的 x-owner-pass 兜底 + 首页「站长保险箱」卡。数据在 KV：owner_hash（口令 SHA-256）、owner_setup_until（设置窗口截止毫秒）、vault_<drive>（各家凭证 JSON，键名与前端凭证表一致）。
+- 开设置窗口：POST /api/owner {action:'open-setup'} 带 x-patrol-key（口令在站长侧保管文件 patrol_key.txt），30 分钟内站长在页面自设口令。重置口令（窗口内再 setpass）会清空全部 vault_*。
+- 夸克兜底顺序：本次请求自带 > 保险箱 vault_quark > 巡检绑定 quark_cookie。
+- 故障排查：保险箱不可用先看 KV 绑定 PAN_KV；口令忘了 = 开窗口重置（凭证需重存，属预期）；保险箱异常不影响无口令解析（parse.js 已 try/catch 隔离）。
