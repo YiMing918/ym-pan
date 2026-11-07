@@ -428,24 +428,34 @@ function drawQr(text){
   for(let r=0;r<n;r++) for(let c=0;c<n;c++) if(qr.isDark(r,c)) ctx.fillRect(off+c*cell,off+r*cell,cell,cell);
 }
 $('#btnQr').onclick=async()=>{
-  const btn=$('#btnQr'); btn.disabled=true;
-  try{
-    const r=await fetch('/api/qr'); const d=await r.json();
-    if(!d.ok){ toast(d.error||'生成失败'); btn.disabled=false; return; }
-    $('#qrBox').style.display='block'; drawQr(d.qr);
-    $('#qrHint').textContent='用夸克 App 扫一扫（二维码 5 分钟内有效）…';
-    clearInterval(qrTimer); let left=70;
-    qrTimer=setInterval(async()=>{
-      if(--left<0){ clearInterval(qrTimer); $('#qrHint').textContent='二维码已过期，重新点生成'; btn.disabled=false; return; }
-      try{
-        const pr=await fetch('/api/qr?action=poll'); const pd=await pr.json();
-        if(pd.state==='done'){ clearInterval(qrTimer); $('#qrHint').textContent='✅ 绑定成功，巡检凭证已保存'; toast('巡检凭证绑定成功'); qrStatus(); btn.disabled=false; }
-        else if(pd.state==='scanned'){ $('#qrHint').textContent='已扫码，请在夸克 App 里点确认登录…'; }
-        else if(pd.state==='expired'){ clearInterval(qrTimer); $('#qrHint').textContent='二维码已过期，重新点生成'; btn.disabled=false; }
-        else if(pd.state==='error'){ clearInterval(qrTimer); $('#qrHint').textContent='❌ '+(pd.error||'绑定失败'); btn.disabled=false; }
-      }catch(e){}
-    },2500);
-  }catch(e){ toast('网络错误：'+e.message); btn.disabled=false; }
+  const btn=$('#btnQr');
+  if(qrTimer){ clearInterval(qrTimer); qrTimer=null; btn.disabled=false; btn.textContent='重新生成二维码'; $('#qrHint').textContent='已停止等待，点生成可重新开始'; return; }
+  btn.textContent='停止等待';
+  const deadline=Date.now()+12*60*1000;
+  const cycle=async()=>{
+    try{
+      const r=await fetch('/api/qr'); const d=await r.json();
+      if(!d.ok){ $('#qrHint').textContent='❌ '+(d.error||'生成失败'); btn.disabled=false; btn.textContent='生成二维码'; return; }
+      $('#qrBox').style.display='block'; drawQr(d.qr);
+      let left=170;
+      $('#qrHint').textContent='用夸克 App 扫这张码，扫完马上在夸克里点「确认登录」（还剩 '+left+' 秒，过期会自动换新码）';
+      clearInterval(qrTimer);
+      qrTimer=setInterval(async()=>{
+        left-=2.5;
+        if(Date.now()>deadline){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='等太久先停了，准备好后重新点生成，扫完立刻确认'; btn.textContent='重新生成二维码'; return; }
+        if(left<0){ clearInterval(qrTimer); $('#qrHint').textContent='上一张过期了，正在自动换新码…'; cycle(); return; }
+        try{
+          const pr=await fetch('/api/qr?action=poll'); const pd=await pr.json();
+          if(pd.state==='done'){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='✅ 绑定成功，巡检凭证已保存'; toast('巡检凭证绑定成功'); qrStatus(); btn.textContent='重新生成二维码'; }
+          else if(pd.state==='scanned'){ $('#qrHint').textContent='已扫码！现在就在夸克 App 里点「确认登录」，别切走'; }
+          else if(pd.state==='expired'){ clearInterval(qrTimer); $('#qrHint').textContent='上一张过期了，正在自动换新码，用新码再扫一次…'; cycle(); }
+          else if(pd.state==='error'){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='❌ '+(pd.error||'绑定失败'); btn.textContent='重新生成二维码'; }
+          else { const h=$('#qrHint'); if(!/已扫码/.test(h.textContent)) h.textContent='用夸克 App 扫这张码，扫完马上点「确认登录」（还剩 '+Math.ceil(left)+' 秒，过期自动换新码）'; }
+        }catch(e){}
+      },2500);
+    }catch(e){ $('#qrHint').textContent='网络错误：'+e.message; btn.textContent='重新生成二维码'; }
+  };
+  cycle();
 };
 
 $('#btnHealth').onclick=async()=>{
