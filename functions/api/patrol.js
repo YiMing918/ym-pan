@@ -69,20 +69,54 @@ async function quarkPatrol(kv, url, pwd) {
     if (!files.length) return { ok: false, stage, error: '测试分享里没有文件（只有文件夹或为空），请换一个含小文件的测试分享' };
     stage = 'download';
     const f0 = files[0];
-    const dl = await fetch(`${base}/file/download?${q}`, {
-      method: 'POST', headers: { ...H, Cookie: jar.str() },
-      body: JSON.stringify({ fids: [f0.fid], fids_token: f0.share_fid_token ? [f0.share_fid_token] : [] }),
-    });
-    jar.absorb(dl);
-    const dld = await dl.json().catch(() => null);
-    const link = dld && dld.data && dld.data[0] && dld.data[0].download_url;
+    const dlOnce = async (fid, fidToken) => {
+      const r = await fetch(`${base}/file/download?${q}`, {
+        method: 'POST', headers: { ...H, Cookie: jar.str() },
+        body: JSON.stringify({ fids: [fid], fids_token: fidToken ? [fidToken] : [] }),
+      });
+      jar.absorb(r);
+      const d = await r.json().catch(() => null);
+      return d && d.data && d.data[0] && d.data[0].download_url ? d.data[0].download_url : null;
+    };
+    let link = await dlOnce(f0.fid, f0.share_fid_token);
+    let route = 'direct';
     if (!link) {
-      return { ok: false, stage, error: `取直链失败（status=${dld && dld.status} code=${dld && dld.code}）：小文件直取被拒时正式解析会走转存路线，巡检只查直取` };
+      // 直取被拒 → 与正式解析同一条转存路线（存到自己盘根目录 → 取链 → 尝试删掉转存件）
+      stage = 'save';
+      const sv = await fetch(`${base}/share/sharepage/save?${q}`, {
+        method: 'POST', headers: { ...H, Cookie: jar.str() },
+        body: JSON.stringify({ fid_list: [f0.fid], fid_token_list: f0.share_fid_token ? [f0.share_fid_token] : [], to_pdir_fid: '0', pwd_id: pwdId, stoken, pdir_fid: '0', scene: 'link' }),
+      });
+      jar.absorb(sv);
+      const svd = await sv.json().catch(() => null);
+      const taskId = svd && svd.data && svd.data.task_id;
+      if (!taskId) return { ok: false, stage, error: `直取被拒且转存也失败（status=${svd && svd.status} code=${svd && svd.code}）` };
+      let savedFid = '';
+      for (let i = 0; i < 10 && !savedFid; i++) {
+        await new Promise(r => setTimeout(r, 900));
+        const t = await fetch(`${base}/task?${q}&task_id=${taskId}&retry_index=${i}`, { headers: { Referer: 'https://pan.quark.cn/', Cookie: jar.str() } });
+        jar.absorb(t);
+        const td2 = await t.json().catch(() => null);
+        const top = td2 && td2.data && td2.data.save_as && td2.data.save_as.save_as_top_fids;
+        if (top && top[0]) savedFid = top[0];
+      }
+      if (!savedFid) return { ok: false, stage, error: '转存超时（10 次轮询没拿到落盘文件）' };
+      stage = 'download';
+      link = await dlOnce(savedFid, '');
+      if (!link) return { ok: false, stage, error: '转存成功但取直链仍失败' };
+      route = 'save';
+      // 尽力清理转存件（失败不算巡检失败，正式解析的转存件本来也会留在用户根目录）
+      try {
+        await fetch(`${base}/file/delete?${q}`, {
+          method: 'POST', headers: { ...H, Cookie: jar.str() },
+          body: JSON.stringify({ action_type: 1, filelist: [savedFid], exclude_fids: [] }),
+        });
+      } catch { /* ignore */ }
     }
     // 回写轮换后的 Cookie
     const fresh = jar.str();
     if (fresh && fresh !== cookie0) await kv.put('quark_cookie', fresh);
-    return { ok: true, stage: 'done', files: dd.data.list.length, firstFile: f0.file_name, linkHost: new URL(link).host };
+    return { ok: true, stage: 'done', route, files: dd.data.list.length, firstFile: f0.file_name, linkHost: new URL(link).host };
   } catch (e) {
     return { ok: false, stage, error: `请求异常：${e.message}` };
   }
