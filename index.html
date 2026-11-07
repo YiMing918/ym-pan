@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>YM 网盘解析 · 只要直链</title>
+<meta name="description" content="自建网盘分享解析：用你自己账号的凭证调用各盘接口，只产直链不中转流量，配合 1DM+/ADM 等下载器使用。">
+<style>
+:root{--bg:#0f141b;--card:#171e28;--card2:#1d2634;--line:#2a3648;--txt:#e8eef6;--sub:#93a5bb;--acc:#4da3ff;--acc2:#2b7de0;--ok:#3ecf8e;--warn:#ffb648;--bad:#ff6b6b;--chip:#22304a}
+@media (prefers-color-scheme: light){:root{--bg:#f2f5f9;--card:#fff;--card2:#f4f7fb;--line:#dde5ee;--txt:#16222f;--sub:#5b6d82;--chip:#e7eef7}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:14px 12px 40px}
+header{padding:10px 2px 4px}
+h1{font-size:21px;margin:0 0 2px}
+.sub{color:var(--sub);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
+.card h2{font-size:15px;margin:0 0 10px}
+.drives{display:flex;flex-wrap:wrap;gap:7px}
+.dchip{border:1px solid var(--line);background:var(--chip);color:var(--txt);border-radius:999px;padding:6px 12px;font-size:13.5px;cursor:pointer}
+.dchip.on{background:var(--acc2);border-color:var(--acc2);color:#fff}
+.dchip .t2{font-size:11px;opacity:.75;margin-left:4px}
+.dchip .t0{font-size:11px;color:var(--warn);margin-left:4px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input[type=text],input[type=password],textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font-size:14.5px;outline:none}
+input:focus,textarea:focus{border-color:var(--acc)}
+textarea{resize:vertical;min-height:64px;font-size:13px}
+.f1{flex:1;min-width:200px}.f2{width:130px}
+button.btn{background:var(--acc2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;cursor:pointer}
+button.btn:disabled{opacity:.55}
+button.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer}
+button.ghost.on{border-color:var(--acc);color:var(--acc)}
+.hint{color:var(--sub);font-size:12.5px;margin-top:8px}
+.msg{margin-top:10px;font-size:13.5px;border-radius:10px;padding:9px 12px;display:none;white-space:pre-wrap;word-break:break-all}
+.msg.err{display:block;background:rgba(255,107,107,.12);color:var(--bad);border:1px solid rgba(255,107,107,.35)}
+.msg.okk{display:block;background:rgba(62,207,142,.10);color:var(--ok);border:1px solid rgba(62,207,142,.3)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.fname{word-break:break-all}
+.fsize{color:var(--sub);white-space:nowrap;font-size:12.5px}
+.scrollbox{max-height:380px;overflow:auto}
+.linkbox{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;word-break:break-all;font-size:13.5px}
+.kv{font-size:12.5px;color:var(--sub);white-space:pre-wrap;word-break:break-all;background:var(--card2);border:1px dashed var(--line);border-radius:10px;padding:9px 12px;margin-top:8px}
+details{margin-top:6px}
+summary{cursor:pointer;color:var(--acc);font-size:13.5px}
+.credgrid{display:grid;grid-template-columns:1fr;gap:10px}
+.credgrid label{font-size:13px;color:var(--sub);display:block;margin-bottom:4px}
+.badge{display:inline-block;font-size:11px;border-radius:6px;padding:1px 7px;background:var(--chip);color:var(--sub);margin-left:6px;vertical-align:2px}
+.badge.ok{color:var(--ok)} .badge.warn{color:var(--warn)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#222e3f;color:#fff;padding:9px 16px;border-radius:999px;font-size:13.5px;opacity:0;pointer-events:none;transition:.25s;z-index:50;max-width:92vw;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%)}
+a{color:var(--acc)}
+.small{font-size:12.5px;color:var(--sub)}
+ol.howto{margin:6px 0 0;padding-left:20px;font-size:13.5px}
+ol.howto li{margin:3px 0}
+.health{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;font-size:13px}
+.health div{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>YM 网盘解析 <span class="badge">只要直链版</span></h1>
+  <div class="sub">粘贴分享链接 → 拿直链 → 交给 1DM+ / ADM / aria2 下载。本站只产直链、不中转流量；解析用的是<b>你自己账号</b>的凭证。</div>
+</header>
+
+<section class="card" id="cParse">
+  <h2>① 解析分享</h2>
+  <div class="drives" id="drives"></div>
+  <div class="row" style="margin-top:12px">
+    <div class="f1"><input type="text" id="inUrl" placeholder="粘贴分享链接（整段分享文字也行，提取码会自动认）"></div>
+    <div class="f2"><input type="text" id="inPwd" placeholder="提取码（可空）"></div>
+  </div>
+  <div class="row" style="margin-top:10px;align-items:center">
+    <button class="btn" id="btnParse">解析</button>
+    <button class="ghost" id="btnBack" style="display:none">← 返回上级</button>
+    <span class="small" id="routeInfo"></span>
+  </div>
+  <div class="msg" id="parseMsg"></div>
+  <div id="listWrap" style="display:none;margin-top:10px">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <span class="small" id="crumb"></span>
+      <span>
+        <button class="ghost" id="btnBatch">批量取链（勾选）</button>
+        <button class="ghost" id="btnCopyAll" style="display:none">复制全部直链</button>
+        <button class="ghost" id="btnDlTxt" style="display:none">导出 .txt</button>
+      </span>
+    </div>
+    <div class="scrollbox"><table><tbody id="rows"></tbody></table></div>
+  </div>
+  <div id="linkWrap" style="display:none;margin-top:12px">
+    <div class="small" style="margin-bottom:6px">直链（有时效，过期重新解析）：</div>
+    <div class="linkbox" id="linkUrl"></div>
+    <div class="kv" id="linkHeaders" style="display:none"></div>
+    <div class="hint" id="linkNote"></div>
+    <div class="row" style="margin-top:9px">
+      <button class="ghost" id="btnCopyLink">复制直链</button>
+      <button class="ghost" id="btnCopyFull">复制「链接+请求头」</button>
+      <button class="ghost" id="btnAria">复制 aria2 命令</button>
+    </div>
+    <div id="batchLinks" style="margin-top:10px"></div>
+  </div>
+</section>
+
+<section class="card" id="cCred">
+  <h2>② 我的凭证 <span class="badge ok">只存本机浏览器</span></h2>
+  <div class="small">凭证只保存在你这台设备的浏览器里，每次解析随请求发给本站函数调用官方接口，用完不落盘、不进服务器存储。哪家填哪家，不填的盘解析时会提示你。失效时重新粘一次即可；夸克/UC 的 Cookie 轮换会自动回写更新。</div>
+  <div class="credgrid" id="credGrid" style="margin-top:10px"></div>
+  <div class="row" style="margin-top:10px">
+    <button class="ghost" id="btnSaveCred">保存凭证</button>
+    <button class="ghost" id="btnClearCred">清空全部</button>
+  </div>
+  <details>
+    <summary>凭证从哪拿？（点开看每家的方法）</summary>
+    <div class="small" style="margin-top:6px;white-space:pre-wrap">百度 BDUSS：电脑浏览器登录 pan.baidu.com → F12 → 应用/Application → Cookie → 找 BDUSS 复制。
+阿里 Authorization：登录 alipan.com → F12 → 网络/Network → 随便点一个 api 请求 → 请求头里的 Authorization（Bearer 开头那串）。
+夸克/UC Cookie：登录 pan.quark.cn / drive.uc.cn → F12 → 网络 → 任一请求 → 请求头 Cookie 整段复制。夸克认准 __puus 在里面。
+123 Authorization：登录 123pan.com → F12 → 网络 → 请求头 Authorization。
+天翼 Cookie：登录 cloud.189.cn → F12 → Cookie 整段。
+移动 Authorization / 小飞机 token / 迅雷 Authorization：各自网页版登录后在网络请求头里找 Authorization。</div>
+  </details>
+</section>
+
+<section class="card" id="cHealth">
+  <h2>③ 接口自检</h2>
+  <div class="small">检查各家官网接口从本站服务器能不能通（不查你的凭证）。某家解析坏了先点这里看一眼：接口还通多半是口径变了，回来反馈即可修。</div>
+  <div class="row" style="margin-top:8px"><button class="ghost" id="btnHealth">开始自检</button><span class="small" id="healthAt"></span></div>
+  <div class="health" id="healthGrid" style="margin-top:10px"></div>
+</section>
+
+<section class="card" id="cNote">
+  <h2>本站怎么运作</h2>
+  <ol class="howto">
+    <li><b>只产直链</b>：本站函数替你向各网盘官方接口问出真实下载地址，文件流量走你和网盘之间，不经过本站——所以不吃 Cloudflare 免费额度，也符合它的使用条款。</li>
+    <li><b>只用你自己的凭证</b>：没有公共账号池（那种池子烧号、连坐封 IP、三天两头全灭）。速度和额度取决于你自己账号是不是会员。</li>
+    <li><b>多路线互备</b>：123 有双接口路线、蓝奏有多个官方域名同码互备、夸克/UC 双网关——一条路线挂了会自动换另一条，解析结果旁会标明走了哪条。</li>
+    <li><b>部分直链要带请求头</b>：百度要带 UA + 你的 BDUSS，夸克/UC 要带 Cookie，阿里要带 Referer。结果区会给出「链接+请求头」和现成的 aria2 命令，粘进下载器即可；1DM+ 在新建任务里能填请求头。</li>
+    <li><b>实验支持的盘</b>：移动、天翼、小飞机、123、迅雷接口变动频繁，已按在维护的开源项目口径实现，但可能需要按报错迭代。光鸭官方分享接口未公开，筹备中，不上假接口。</li>
+    <li><b>已知边界</b>：超大文件在夸克/UC 会先转存进你自己网盘再取链（会占你空间，可事后删）；百度风控最重，日解析量过大（社区口径约 200–300GB）会当日限流。</li>
+  </ol>
+</section>
+
+<footer class="small" style="text-align:center;margin-top:16px">YM Pan · 自建自用 · 解析口径跟随在维护的开源项目（JxPan / LinkSwift / baiduwp 等）</footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const DRIVES = [
+  { id:'baidu', name:'百度', tier:1, re:/pan\.baidu\.com/ },
+  { id:'aliyun', name:'阿里', tier:1, re:/(aliyundrive|alipan)\.com/ },
+  { id:'quark', name:'夸克', tier:1, re:/pan\.quark\.cn/ },
+  { id:'uc', name:'UC', tier:1, re:/drive\.uc\.cn|fast\.uc\.cn/ },
+  { id:'lanzou', name:'蓝奏', tier:1, re:/lanzou|ilanzou/ },
+  { id:'cmcc', name:'移动云盘', tier:2, re:/yun\.139\.com/ },
+  { id:'ctyun', name:'天翼', tier:2, re:/cloud\.189\.cn/ },
+  { id:'feijipan', name:'小飞机', tier:2, re:/feijipan\.com/ },
+  { id:'pan123', name:'123', tier:2, re:/123pan\.(com|cn)|123684\.com|123865\.com|123912\.com/ },
+  { id:'xunlei', name:'迅雷', tier:2, re:/pan\.xunlei\.com/ },
+  { id:'guangya', name:'光鸭', tier:0, re:/guangyapan\.com/ },
+];
+const CREDS = [
+  { drive:'baidu', key:'bduss', label:'百度 BDUSS', ph:'粘贴 BDUSS 值' },
+  { drive:'baidu', key:'stoken', label:'百度 STOKEN（可空）', ph:'一般不用填' },
+  { drive:'aliyun', key:'aliAuth', label:'阿里 Authorization（可空，填了更稳）', ph:'Bearer …' },
+  { drive:'quark', key:'quarkCookie', label:'夸克 Cookie（整段）', ph:'含 __puus 的整段 Cookie' },
+  { drive:'uc', key:'ucCookie', label:'UC Cookie（整段）', ph:'整段 Cookie' },
+  { drive:'cmcc', key:'cmccAuth', label:'移动 Authorization（可空）', ph:'网页版请求头里的 Authorization' },
+  { drive:'ctyun', key:'ctCookie', label:'天翼 Cookie（取链多半需要）', ph:'整段 Cookie' },
+  { drive:'feijipan', key:'fjToken', label:'小飞机 token（可空）', ph:'登录后的 token' },
+  { drive:'pan123', key:'p123Token', label:'123 Authorization（取链需要）', ph:'Bearer … 或 JWT' },
+  { drive:'xunlei', key:'xlAuth', label:'迅雷 Authorization（可空）', ph:'Bearer …' },
+];
+const $ = s => document.querySelector(s);
+const state = { drive:'baidu', ctx:null, files:[], stack:[], lastLink:null, batch:[] };
+let toastTimer;
+function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),2400); }
+function msg(kind, text){ const el=$('#parseMsg'); el.className='msg '+(kind||''); el.textContent=text||''; if(!text) el.style.display='none'; }
+function fmtSize(n){ if(!n) return '—'; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return n.toFixed(n>=100?0:n>=10?1:2)+' '+u[i]; }
+function credKey(k){ return 'ympan_cred_'+k; }
+function loadCreds(){ const o={}; for(const c of CREDS){ const v=localStorage.getItem(credKey(c.key)); if(v) o[c.key]=v; } return o; }
+function saveCredField(k,v){ if(v) localStorage.setItem(credKey(k), v); else localStorage.removeItem(credKey(k)); }
+
+/* drive chips */
+const dw=$('#drives');
+for(const d of DRIVES){
+  const b=document.createElement('button'); b.className='dchip'+(d.id===state.drive?' on':''); b.dataset.id=d.id;
+  b.innerHTML=d.name+(d.tier===2?'<span class="t2">实验</span>':d.tier===0?'<span class="t0">筹备中</span>':'');
+  b.onclick=()=>{ state.drive=d.id; document.querySelectorAll('.dchip').forEach(x=>x.classList.toggle('on',x.dataset.id===d.id)); };
+  dw.appendChild(b);
+}
+function detectDrive(text){ for(const d of DRIVES){ if(d.re.test(text)) return d.id; } return null; }
+
+/* cred form */
+const cg=$('#credGrid');
+for(const c of CREDS){
+  const div=document.createElement('div');
+  div.innerHTML=`<label>${c.label}</label>`;
+  const inp=document.createElement('input'); inp.type='text'; inp.id='cred_'+c.key; inp.placeholder=c.ph; inp.autocomplete='off';
+  inp.value=localStorage.getItem(credKey(c.key))||'';
+  div.appendChild(inp); cg.appendChild(div);
+}
+$('#btnSaveCred').onclick=()=>{ for(const c of CREDS){ saveCredField(c.key, $('#cred_'+c.key).value.trim()); } toast('凭证已保存在本机浏览器'); };
+$('#btnClearCred').onclick=()=>{ for(const c of CREDS){ localStorage.removeItem(credKey(c.key)); $('#cred_'+c.key).value=''; } toast('已清空'); };
+
+function extractFromText(t){
+  const urlM = t.match(/https?:\/\/[^\s，。；、）)】]+/);
+  const url = urlM ? urlM[0] : t.trim();
+  let pwd='';
+  const pm = t.match(/(?:提取码|访问码|密码|pwd|code)[：:\s]*([A-Za-z0-9]{4,8})/i) || url.match(/[?&](?:pwd|code|passcode)=([A-Za-z0-9]+)/i);
+  if(pm) pwd=pm[1];
+  return { url, pwd };
+}
+
+async function api(payload){
+  const r = await fetch('/api/parse', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  return r.json();
+}
+
+function applyCredUpdate(drive, upd){
+  if(!upd) return;
+  if(upd.cookie && (drive==='quark'||drive==='uc')){
+    const key = drive==='quark' ? 'quarkCookie' : 'ucCookie';
+    saveCredField(key, upd.cookie);
+    const inp=$('#cred_'+key); if(inp) inp.value=upd.cookie;
+    toast('Cookie 已自动更新（__puus 轮换）');
+  }
+}
+
+function showLink(res){
+  state.lastLink=res; state.batch=[];
+  $('#linkUrl').textContent=res.url||'';
+  const h=res.headers||{};
+  const lines=Object.entries(h).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`);
+  const kv=$('#linkHeaders');
+  if(lines.length){ kv.style.display='block'; kv.textContent='下载时要带上这组请求头：\n'+lines.join('\n'); } else kv.style.display='none';
+  $('#linkNote').textContent=res.note||'';
+  $('#batchLinks').innerHTML='';
+  $('#linkWrap').style.display='block';
+  $('#btnCopyAll').style.display='none'; $('#btnDlTxt').style.display='none';
+}
+function fullText(res){
+  const h=res.headers||{};
+  let t=res.url;
+  const lines=Object.entries(h).filter(([,v])=>v);
+  if(lines.length){ t+='\n'+lines.map(([k,v])=>`${k}: ${v}`).join('\n'); }
+  return t;
+}
+function ariaCmd(res){
+  const h=res.headers||{}; let c=`aria2c -x 16 -s 16 --check-certificate=false`;
+  if(h['User-Agent']) c+=` --user-agent="${h['User-Agent']}"`;
+  if(h['Cookie']) c+=` --header="Cookie: ${h['Cookie']}"`;
+  if(h['Referer']) c+=` --referer="${h['Referer']}"`;
+  c+=` "${res.url}"`;
+  return c;
+}
+async function copyText(t, tip){ try{ await navigator.clipboard.writeText(t); toast(tip||'已复制'); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(tip||'已复制'); } }
+$('#btnCopyLink').onclick=()=> state.lastLink && copyText(state.lastLink.url,'直链已复制');
+$('#btnCopyFull').onclick=()=> state.lastLink && copyText(fullText(state.lastLink),'已复制（链接+请求头）');
+$('#btnAria').onclick=()=> state.lastLink && copyText(ariaCmd(state.lastLink),'aria2 命令已复制');
+
+function renderList(res){
+  state.ctx=res.ctx; state.files=res.files||[];
+  $('#crumb').textContent=`共 ${state.files.length} 项`+(res.route?` · 路线：${res.route}`:'');
+  $('#routeInfo').textContent=res.route?('解析路线：'+res.route):'';
+  const tb=$('#rows'); tb.innerHTML='';
+  for(const f of state.files){
+    const tr=document.createElement('tr');
+    const cb = f.dir?'':`<input type="checkbox" class="pick" data-id="${CSS.escape(String(f.id))}">`;
+    tr.innerHTML=`<td style="width:26px">${cb}</td><td class="fname">${f.dir?'📁 ':'📄 '}${f.name.replace(/</g,'&lt;')}</td><td class="fsize">${f.dir?'':fmtSize(f.size)}</td><td style="width:74px;text-align:right"></td>`;
+    const cell=tr.lastElementChild;
+    const btn=document.createElement('button'); btn.className='ghost'; btn.textContent=f.dir?'打开':'取链';
+    btn.onclick=()=> f.dir ? openFolder(f) : getLink(f);
+    cell.appendChild(btn);
+    tb.appendChild(tr);
+  }
+  $('#listWrap').style.display='block';
+  $('#btnBack').style.display=state.stack.length?'':'none';
+}
+async function openFolder(f){
+  state.stack.push({ ctx: state.ctx, files: state.files });
+  msg('', ''); 
+  const newCtx = { ...state.ctx, dir: state.ctx && state.ctx.drive==='aliyun' ? f.id : f.id };
+  if(state.drive==='baidu') newCtx.dir=f.path;
+  if(state.drive==='pan123') newCtx.dir=String(f.id);
+  try{
+    const res=await api({ drive:state.drive, action:'list', url:$('#inUrl').value.trim(), pwd:$('#inPwd').value.trim(), cred:loadCreds(), ctx:newCtx });
+    if(!res.ok){ state.stack.pop(); msg('err', res.error||'打开文件夹失败'); return; }
+    applyCredUpdate(state.drive, res.credUpdate);
+    renderList(res);
+  }catch(e){ state.stack.pop(); msg('err','网络错误：'+e.message); }
+}
+$('#btnBack').onclick=()=>{
+  const prev=state.stack.pop(); if(!prev) return;
+  renderList({ ctx:prev.ctx, files:prev.files });
+};
+async function getLink(f){
+  msg('','');
+  try{
+    const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:state.ctx, file:f });
+    if(!res.ok){ msg('err', res.error||'取链失败'); return; }
+    applyCredUpdate(state.drive, res.credUpdate);
+    if(res.route) $('#routeInfo').textContent='取链路线：'+res.route;
+    showLink(res);
+  }catch(e){ msg('err','网络错误：'+e.message); }
+}
+$('#btnBatch').onclick=async()=>{
+  const picks=[...document.querySelectorAll('.pick:checked')].map(x=>x.dataset.id);
+  if(!picks.length){ toast('先勾选文件'); return; }
+  const files=state.files.filter(f=>picks.includes(String(f.id)));
+  state.batch=[];
+  const box=$('#batchLinks'); box.innerHTML='<div class="small">批量取链中…</div>';
+  let html='';
+  for(const f of files){
+    try{
+      const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:state.ctx, file:f });
+      if(res.ok){ state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>${res.url}</div>`; }
+      else html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>失败：${(res.error||'').replace(/</g,'&lt;')}</div>`;
+    }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>失败：${e.message}</div>`; }
+    box.innerHTML=html;
+  }
+  $('#linkWrap').style.display='block';
+  if(state.batch.length){ $('#btnCopyAll').style.display=''; $('#btnDlTxt').style.display=''; }
+};
+$('#btnCopyAll').onclick=()=> copyText(state.batch.map(b=>b.url).join('\n'), '全部直链已复制（一行一条）');
+$('#btnDlTxt').onclick=()=>{
+  const content=state.batch.map(b=>{
+    let t=b.url+'\n  out='+ (b.name||'file');
+    const h=b.headers||{};
+    if(h['User-Agent']) t+='\n  user-agent='+h['User-Agent'];
+    if(h['Cookie']) t+='\n  header=Cookie: '+h['Cookie'];
+    if(h['Referer']) t+='\n  referer='+h['Referer'];
+    return t;
+  }).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:'text/plain'})); a.download='ym-pan-links.txt'; a.click();
+  toast('已导出 aria2 格式 .txt');
+};
+
+$('#inUrl').addEventListener('input', e=>{
+  const { pwd } = extractFromText(e.target.value);
+  const d = detectDrive(e.target.value);
+  if(d){ state.drive=d; document.querySelectorAll('.dchip').forEach(x=>x.classList.toggle('on',x.dataset.id===d)); }
+  if(pwd && !$('#inPwd').value) $('#inPwd').value=pwd;
+});
+$('#btnParse').onclick=async()=>{
+  const raw=$('#inUrl').value.trim(); if(!raw){ toast('先粘贴分享链接'); return; }
+  const { url, pwd } = extractFromText(raw);
+  const d = detectDrive(url); if(d) state.drive=d;
+  state.stack=[]; msg('',''); $('#listWrap').style.display='none'; $('#linkWrap').style.display='none';
+  const btn=$('#btnParse'); btn.disabled=true; btn.textContent='解析中…';
+  try{
+    const res=await api({ drive:state.drive, action:'list', url, pwd: $('#inPwd').value.trim()||pwd, cred:loadCreds() });
+    if(!res.ok){ msg('err', res.error||'解析失败'); return; }
+    applyCredUpdate(state.drive, res.credUpdate);
+    if(res.kind==='link'){ showLink(res); msg('okk','解析成功，拿直链去下载器里下吧'); }
+    else renderList(res);
+  }catch(e){ msg('err','网络错误：'+e.message); }
+  finally{ btn.disabled=false; btn.textContent='解析'; }
+};
+
+$('#btnHealth').onclick=async()=>{
+  $('#healthGrid').innerHTML='<div class="small">自检中…</div>';
+  try{
+    const r=await fetch('/api/parse?action=health'); const d=await r.json();
+    $('#healthAt').textContent=d.at?(' 时间：'+new Date(d.at).toLocaleString('zh-CN')):'';
+    $('#healthGrid').innerHTML=(d.health||[]).map(h=>`<div>${h.reachable?'🟢':'🔴'} ${h.name}<br><span class="small">HTTP ${h.status||'无响应'}</span></div>`).join('');
+  }catch(e){ $('#healthGrid').innerHTML='<div class="small">自检失败：'+e.message+'</div>'; }
+};
+</script>
+</body>
+</html>

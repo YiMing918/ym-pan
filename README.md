@@ -1,0 +1,146 @@
+# YM 网盘解析 · 只要直链版
+
+![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Drives](https://img.shields.io/badge/%E6%94%AF%E6%8C%81-11%20%E5%AE%B6%E7%BD%91%E7%9B%98-blue)
+![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
+
+把网盘分享链接解析成**真实直链**，交给 1DM+、ADM、aria2 等下载器下载。部署在 Cloudflare Pages + Functions，免费额度内运行。
+
+> **定位说清楚**：本站只产直链、**不中转文件流量**（不违反 CF 条款、不吃带宽额度）；解析只用**你自己账号**的凭证调官方接口，没有公共账号池——速度与额度取决于你自己的账号等级。
+
+## 目录
+- [支持的网盘](#支持的网盘)
+- [预览](#预览)
+- [怎么用](#怎么用)
+- [原理：每家怎么解析的](#原理每家怎么解析的)
+- [多路线互备与自动更新](#多路线互备与自动更新)
+- [部署（小白版）](#部署小白版)
+- [凭证从哪拿](#凭证从哪拿)
+- [环境变量兜底（可选）](#环境变量兜底可选)
+- [已知边界](#已知边界)
+- [常见问题](#常见问题)
+- [隐私](#隐私)
+- [致谢与口径来源](#致谢与口径来源)
+- [版本历史](#版本历史)
+
+## 支持的网盘
+
+| 网盘 | 级别 | 需要的凭证 | 备注 |
+|---|---|---|---|
+| 百度网盘 | 主力 | BDUSS | 直链下载须带专用 UA + BDUSS |
+| 阿里云盘 | 主力 | 可匿名（填 Authorization 更稳） | 直链带 Referer 校验 |
+| 夸克网盘 | 主力 | 整段 Cookie | 大文件自动转存后取链；`__puus` 自动轮换回写 |
+| UC 网盘 | 主力 | 整段 Cookie | 与夸克同系双网关 |
+| 蓝奏云 | 主力 | 免登录 | 多个官方域名同码互备；单文件约 100MB 上限 |
+| 移动云盘 | 实验 | Authorization 可选 | 接口口径来自 JxPan 的 IOutLink V6/V3 |
+| 天翼云盘 | 实验 | Cookie（取链多半需要） | open/share 系列接口 |
+| 小飞机网盘 | 实验 | token 可选 | `/ws/share/list` + `/ws/file/redirect` |
+| 123 云盘 | 实验 | Authorization（取链需要） | 双路线：123pan.com/api 与 123pan.cn/b/api 自动回退 |
+| 迅雷云盘 | 实验 | Authorization 可选 | 需 captcha 令牌，风控最重，属已知难点 |
+| 光鸭云盘 | 筹备中 | — | 官方分享接口未公开（设备授权流），确认口径后再接入，不上假接口 |
+
+## 预览
+
+![桌面端文件列表](https://cdn.jsdelivr.net/gh/YiMing918/ym-pan@main/docs/preview.png)
+
+![桌面端直链结果](https://cdn.jsdelivr.net/gh/YiMing918/ym-pan@main/docs/preview-link.png)
+
+<img src="https://cdn.jsdelivr.net/gh/YiMing918/ym-pan@main/docs/preview-mobile.png" width="300" alt="手机端">
+
+（预览图均为示例数据。）
+
+## 怎么用
+
+1. 在「凭证」卡里填好对应网盘的凭证（只存你本机浏览器，见下「凭证从哪拿」）。
+2. 把分享链接粘进解析框——整段分享文字也行，提取码会自动认出来。
+3. 点「解析」：单文件直接出直链；文件夹逐层打开，文件点「取链」，也可勾选多个「批量取链」。
+4. 拿直链去下载器：可复制**直链**、复制**「链接+请求头」**、复制现成的 **aria2 命令**，或把批量结果导出成 aria2 格式的 `.txt`。
+5. 某家解析坏了，先点「接口自检」看各家官网通断：接口还通而解析失败，多半是该家改了口径，按报错回来提 issue 即可。
+
+## 原理：每家怎么解析的
+
+本站函数（`functions/api/parse.js`）在服务端替你走各家网页版/官方接口的标准流程，浏览器不直连网盘（避开跨域），凭证只出现在你与本站之间的请求里：
+
+- **百度**：GET 分享页取 `sign/timestamp/shareid`（顺手拿 `PANPSC`）→ POST `share/verify` 验提取码得 `randsk` → `share/list` 列目录 → `api/sharedownload` 取 `dlink`。下载端须带 `netdisk` UA 与 BDUSS。
+- **阿里**：`get_share_token`（匿名+提取码）→ `list_by_share` → `get_share_link_download_url`；填了自己的 Authorization 会一并带上。
+- **夸克 / UC**：`sharepage/token` 拿 `stoken` → `sharepage/detail` 列目录 → 小文件 `file/download` 直取；大文件先 `sharepage/save` 转存进你自己盘根目录再取链（转存物可事后删）。响应里的新 Cookie（`__puus` 轮换）会回吐给页面自动更新本地凭证。
+- **蓝奏**：分享页 → iframe 子页提取 `sign` → POST `ajaxm.php?action=downprocess` 得 `dom + url` 拼直链；主域名失败自动换其他官方等价域名同码重试。
+- **移动**：`share-kd-njs` 的 `getOutLinkInfoV6` 列目录、`dlFromOutLinkV3` 取链。
+- **天翼**：`getShareInfoByCodeV2` →（有访问码时）`checkAccessCode` → `listFiles` → `getFileDownloadUrl`。
+- **小飞机**：`/ws/share/list` 列目录 → `/ws/file/redirect` 取跳转直链。
+- **123**：`share/list` 列目录（路线 A 失败自动切路线 B）→ `file/download_info` 取链。
+- **迅雷**：先 `captcha/init` 换 `x-captcha-token` → `drive/v1/share` 列目录 → `share/detail` 取链。
+
+## 多路线互备与自动更新
+
+- **一条坏了自动换另一条**：123 双接口路线、蓝奏多域名、夸克/UC 双网关形态——单点口径变化不至于全盘不可用；解析结果旁标注实际走通的路线。
+- **凭证自动更新**：夸克/UC 的 `__puus` 每次响应轮换，本站会把新 Cookie 回写到你浏览器的本地凭证里，不用手动追着换。
+- **口径跟随维护中的上游**：各家接口口径对照仍在活跃维护的开源项目（JxPan、LinkSwift、baiduwp、NFD 等，见「致谢」）。哪家改版，对照上游新口径修对应适配器即可，其他家不受影响。
+- **接口自检**：页面内置一键自检，从本站服务器探测 10 家官网接口连通性，坏没坏先有个判断。
+
+## 部署（小白版）
+
+全程免费，不需要服务器。
+
+1. **Fork 本仓库**（或下载代码后在 GitHub 新建仓库上传）。
+2. 打开 [Cloudflare 控制台](https://dash.cloudflare.com/) → **Workers 和 Pages** → **创建** → **Pages** → **连接到 Git**，选你的仓库。
+3. 构建设置：**框架预设 = 无（None）**、**构建命令 = 留空**、**输出目录 = `/`**，保存并部署。
+4. （可选）**设置 → 自定义域** 绑定你自己的域名。
+5. 打开站点，先点「接口自检」，再填凭证解析一个真实分享试用。
+
+> 注意：不要用「直接上传」方式部署压缩包后又想改代码——连接 Git 仓库的方式能自动跟随你仓库的每次更新重新部署，这就是本站「自动更新」的部署侧形态。
+
+## 凭证从哪拿
+
+都在**你自己登录后的网页版**里拿（F12 开发者工具）：
+
+| 凭证 | 路径 |
+|---|---|
+| 百度 BDUSS | 登录 pan.baidu.com → F12 → 应用（Application）→ Cookie → `BDUSS` |
+| 阿里 Authorization | 登录 alipan.com → F12 → 网络 → 任一 api 请求 → 请求头 `Authorization` |
+| 夸克 / UC Cookie | 登录 pan.quark.cn / drive.uc.cn → F12 → 网络 → 任一请求 → 请求头 `Cookie` 整段（夸克认准含 `__puus`） |
+| 123 Authorization | 登录 123pan.com → F12 → 网络 → 请求头 `Authorization` |
+| 天翼 Cookie | 登录 cloud.189.cn → F12 → Cookie 整段 |
+| 移动 / 小飞机 / 迅雷 | 各自网页版登录后，网络请求头里的 `Authorization` / token |
+
+## 环境变量兜底（可选）
+
+只想自己用的部署者，可以把凭证配在 Pages 项目的**环境变量**里（页面不填时自动用它）：`BDUSS`、`BDUSS_STOKEN`、`ALI_AUTH`、`QUARK_COOKIE`、`UC_COOKIE`、`CMCC_AUTH`、`CT_COOKIE`、`FEIJIPAN_TOKEN`、`PAN123_TOKEN`、`XUNLEI_AUTH`。优先级：页面自带凭证 > 环境变量。**给别人用的部署不要配环境变量**，否则等于拿你的账号给所有人解析。
+
+## 已知边界
+
+- 直链都有时效（几十分钟到数小时不等，百度约 8 小时），过期重新解析即可。
+- 百度风控最重：社区口径单个账号日解析下载约 200–300GB 会触发限流（错误 9013），长期超量可能封号 5–7 天——这也是本站坚持「只用自己凭证、不搞公共池」的原因。
+- 夸克/UC 大文件必须先转存进你自己的盘（占空间），小文件可直取。
+- 迅雷每类请求都要验证码令牌，低风险时接口直发、风控时可能要求人工验证，这是迅雷这家的固有难点。
+- Cloudflare 免费额度：Functions 每天 10 万次请求、单请求 50 次子请求，个人自用绰绰有余。
+- 蓝奏 2026 年起部分页面带 JS 人机挑战（`acw_sc__v2`），命中时纯接口过不去，会如实报错。
+
+## 常见问题
+
+**Q：为什么不直接在站里下载？**
+A：直链交付给专业下载器（多线程、断点续传）体验更好；且中转流量既违反 CF 条款又烧额度。本站的活就是「问出地址」，下载交给 1DM+/ADM/aria2。
+
+**Q：凭证安全吗？**
+A：只存在你浏览器的 localStorage 里，随每次解析请求发给本站函数、函数用完即弃，不写任何数据库。本站代码开源可查。给别人部署的站点请让访客各填各的。
+
+**Q：解析速度/限速由什么决定？**
+A：你的账号等级。SVIP/会员直链就是快，普通账号该限速还是限速——本站只负责拿到「你账号本该有的」那条链。
+
+**Q：某家突然全挂？**
+A：先跑「接口自检」：接口不通是该家在维护/封 IP 段，等一等；接口通但解析失败是口径改版，等本站按上游新口径更新适配器（或提 issue 附报错原文）。
+
+## 隐私
+
+- 本站不设任何统计、日志与数据库；凭证不落盘、不上传第三方。
+- 解析请求只会发往对应网盘的官方域名。
+- 部署者若配了环境变量凭证，等于自愿把该账号开放给站点访客解析，请慎重。
+
+## 致谢与口径来源
+
+各盘接口口径调研与对照（2026-11 核查，均在维护中）：[hmjz100/LinkSwift](https://github.com/hmjz100/LinkSwift)、[ByLsPro/JxPan](https://github.com/ByLsPro/JxPan)、[yuantuo666/baiduwp](https://github.com/yuantuo666/baiduwp)、[qaiu/netdisk-fast-download](https://github.com/qaiu/netdisk-fast-download)、[OpenListTeam/OpenList](https://github.com/OpenListTeam/OpenList)。本仓库为独立实现，未复制上述项目代码。
+
+## 版本历史
+
+- **v1.0（2026-11-07）**：首发。11 家盘（9 家可解析 + 迅雷实验 + 光鸭筹备中）；直链三件套（复制直链 / 链接+请求头 / aria2 命令）+ 批量取链导出；凭证本地存储与夸克/UC Cookie 自动回写；123 双路线、蓝奏多域名互备；接口自检；环境变量兜底。
