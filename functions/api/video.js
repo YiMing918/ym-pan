@@ -405,10 +405,27 @@ async function parseBilibili(rawUrl) {
   const buvid = await bilibiliBuvid();
   const auth = buvid ? { ...ref, Cookie: buvid } : ref;
   const viewR = await fetchText(`https://api.bilibili.com/x/web-interface/view?bvid=${bv}`, { ua: UA_DESKTOP, headers: auth });
-  let view;
-  try { view = JSON.parse(viewR.text); } catch { throw new Error('B 站接口被拦截（返回了网页而不是数据，多半是风控），稍后再试'); }
-  if (view.code === -404) throw new Error('这个 B 站视频不存在或已删除');
-  if (!view.data) throw new Error('B 站视频信息获取失败（可能被风控 -352/412），稍后再试');
+  let view = null;
+  try { view = JSON.parse(viewR.text); } catch { view = null; }
+  if (view && view.code === -404) throw new Error('这个 B 站视频不存在或已删除');
+  if (!view || !view.data) {
+    // 接口被拦时走视频页 __playinfo__ 兜底（页面常比 API 宽容）
+    const page = await fetchText(`https://www.bilibili.com/video/${bv}`, { ua: UA_DESKTOP, headers: auth });
+    const pi = extractJsonAfter(page.text, 'window.__playinfo__=');
+    const pd = pi && pi.data;
+    if (!pd || (!pd.durl && !pd.dash)) throw new Error('B 站接口被拦截（返回了网页而不是数据，多半是风控），稍后再试');
+    const qs = [];
+    if (pd.durl && pd.durl.length) qs.push({ label: '单文件 MP4（可直接下载）', url: pd.durl[0].url });
+    if (pd.dash) {
+      const vs = [...(pd.dash.video || [])].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
+      if (vs.length) qs.push({ label: `视频轨 ${vs[0].id}（无声，需与音频轨一起下后合并）`, url: vs[0].baseUrl || vs[0].base_url });
+      const as = [...(pd.dash.audio || [])].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
+      if (as.length) qs.push({ label: '音频轨（与视频轨一起下载）', url: as[0].baseUrl || as[0].base_url });
+    }
+    const tm = page.text.match(/<meta property="og:title" content="([^"]+)"/) || page.text.match(/<title>([^<]+?) - 哔哩哔哩/);
+    const im = page.text.match(/<meta property="og:image" content="([^"]+)"/);
+    return { platform: 'bilibili', type: 'video', title: tm ? tm[1] : '', author: '', cover: im ? im[1] : '', url: qs[0].url, qualities: qs, needReferer: 'https://www.bilibili.com/', route: '视频页 __playinfo__（接口被拦兜底）', note: 'B 站直链下载时必须带 Referer（已在下方「链接+请求头」里配好）；未登录最高约 480p/720p 双流，1080p 需要登录，本站不收你的 B 站账号。' };
+  }
   const cid = view.data.cid;
   const base = { platform: 'bilibili', title: view.data.title || '', author: (view.data.owner && view.data.owner.name) || '', cover: view.data.pic || '', needReferer: 'https://www.bilibili.com/' };
   const qualities = [];
