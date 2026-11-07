@@ -20,6 +20,15 @@ const DRIVES = {
   guangya:  { name: '光鸭云盘', tier: 0 }, // 筹备中：官方分享接口未公开、需设备授权流
 };
 
+/* ==== CONFIG:BEGIN 易变参数区（看门狗/维护者只改这里的值，不动下面的逻辑）====
+   lanzouMirrors：蓝奏官方等价域名，失效的会被看门狗摘掉、活的排前面；
+   pan123Bases：123 的两条接口路线，按顺序尝试，第一条通就用第一条。 */
+const CONFIG = {
+  lanzouMirrors: ['lanzoui.com', 'lanzoux.com', 'lanzouo.com', 'lanzouq.com', 'lanzoup.com', 'lanzouh.com'],
+  pan123Bases: ['https://www.123pan.com/api', 'https://www.123pan.cn/b/api'],
+};
+/* ==== CONFIG:END ==== */
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -322,7 +331,7 @@ const uc = quarkFamily('pc-api.uc.cn', 'UCBrowser', 'UC');
    老流程：分享页 → iframe(/fn/ 或 /tp/) 子页拿 sign → POST ajaxm.php?action=downprocess。
    蓝奏官方有多个等价域名，主域被挑战/被墙时同码换域名重试（天然多路由）。
    2026 起部分页面带 acw_sc__v2 JS 挑战，纯接口可能被拦——失败即如实报错。 */
-const LANZOU_MIRRORS = ['lanzoui.com', 'lanzoux.com', 'lanzouo.com', 'lanzouq.com', 'lanzoup.com', 'lanzouh.com', 'lanzoui.com'];
+const LANZOU_MIRRORS = CONFIG.lanzouMirrors;
 const lz = {
   hosts(url) {
     const m = url.match(/([A-Za-z0-9-]+)\.(lanzou[a-z]?\.com|ilanzou\.com|lanzoui\.com)/i);
@@ -528,9 +537,10 @@ const pan123 = {
     const key = (ctx && ctx.key) || pan123.key(url);
     const parentId = (ctx && ctx.dir) || '0';
     let items, route;
-    try { items = await pan123.tryList('https://www.123pan.com/api', key, pwd, cred, parentId); route = 'A 官方接口'; }
+    const [baseA, baseB] = CONFIG.pan123Bases;
+    try { items = await pan123.tryList(baseA, key, pwd, cred, parentId); route = `主接口 ${baseA}`; }
     catch (e1) {
-      try { items = await pan123.tryList('https://www.123pan.cn/b/api', key, pwd, cred, parentId); route = 'B 备用接口'; }
+      try { items = await pan123.tryList(baseB, key, pwd, cred, parentId); route = `备用接口 ${baseB}`; }
       catch (e2) { throw new Error(`${e1.message}；备用路线也失败：${e2.message}`); }
     }
     const files = items.map(f => ({
@@ -541,7 +551,7 @@ const pan123 = {
   },
   async download(cred, env, ctx, file) {
     const payload = { ShareKey: ctx.key, FileID: Number(file.id) || file.id, S3KeyFlag: file.s3 || '', FileName: file.name, Etag: file.etag || '', Size: file.size || 0 };
-    const bases = ['https://www.123pan.com/api', 'https://www.123pan.cn/b/api'];
+    const bases = CONFIG.pan123Bases;
     let lastErr = null;
     for (const base of bases) {
       try {
