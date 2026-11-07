@@ -2,7 +2,7 @@
 // 形态与网盘解析一致：服务端解析分享页/接口，只回直链，绝不中转视频流量；
 // 视频平台大多免登录（分享页公开），不需要用户凭证。
 // 口径依据 2026-11 在维护开源项目（MediaGet / media-parser / short_videos 等），维修见 MAINTENANCE.md。
-// 平台分档：主力 douyin/kuaishou/weibo/xiaohongshu/acfun/bilibili；实验 tiktok/jimeng；youtube 平台对服务器 IP
+// 平台分档：主力 douyin/kuaishou/weibo/xiaohongshu/acfun；实验 bilibili/tiktok/jimeng；youtube 平台对服务器 IP
 // 有机器人墙 + PO Token 要求，服务端无法取直链，只回嵌入地址并如实说明。
 
 const UA_MOBILE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1';
@@ -14,7 +14,7 @@ kuaishou: { name: '快手', tier: 1},
 weibo: { name: '微博视频', tier: 1},
 xiaohongshu: { name: '小红书', tier: 1},
 acfun: { name: 'AcFun', tier: 1},
-bilibili: { name: '哔哩哔哩', tier: 1},
+bilibili: { name: '哔哩哔哩', tier: 2 },
 tiktok: { name: 'TikTok', tier: 2},
 jimeng: { name: '即梦 / Dreamina', tier: 2},
 youtube: { name: 'YouTube', tier: 0},
