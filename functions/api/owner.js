@@ -44,6 +44,14 @@ async function passOk(kv, pass) {
   return (await sha256hex(pass)) === h;
 }
 
+function genRecovery() {
+  const abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  const chars = [...buf].map(b => abc[b % abc.length]).join('');
+  return chars.replace(/(.{4})(?=.)/g, '$1-');
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const kv = env.PAN_KV;
@@ -69,6 +77,7 @@ export async function onRequest(context) {
     return json({
       ok: true,
       hasPass: !!(await kv.get('owner_hash')),
+      hasRecovery: !!(await kv.get('owner_recovery_hash')),
       setupOpen: await setupOpen(kv),
       vaulted,
       quarkBound: !!(await kv.get('quark_cookie')),
@@ -76,16 +85,25 @@ export async function onRequest(context) {
   }
 
   if (action === 'setpass') {
-    if (!(await setupOpen(kv))) return fail('设置窗口未开启。请让助理先开启 30 分钟设置窗口，再回来设置口令。');
+    // 三条授权路径，互为兜底、都不依赖任何人常驻：① 30 分钟设置窗口（巡检口令开启）
+    // ② 从未设过口令（首次认领，含在 Cloudflare 后台删键后的终极重置）③ 有效的恢复码
+    const had = !!(await kv.get('owner_hash'));
+    const recHash = await kv.get('owner_recovery_hash');
+    const recOk = !!(body.recovery && recHash && (await sha256hex(String(body.recovery).replace(/[\s-]/g, '').toUpperCase())) === recHash);
+    if (!(await setupOpen(kv)) && had && !recOk) {
+      return fail('设置窗口未开启，且恢复码不正确。可用恢复码重置，或让助理开启 30 分钟设置窗口。');
+    }
     const p = String(body.pass || '');
     if (p.length < 6) return fail('口令至少 6 位');
-    const had = !!(await kv.get('owner_hash'));
     await kv.put('owner_hash', await sha256hex(p));
     await kv.delete('owner_setup_until');
     if (had) { // 重置口令：清空保险箱凭证，防旧口令泄露连带
       for (const d of Object.keys(VAULT_KEYS)) await kv.delete('vault_' + d);
     }
-    return json({ ok: true, reset: had });
+    // 每次设/重置口令都签发一串新恢复码，只在本次响应里明文出现一次
+    const recovery = genRecovery();
+    await kv.put('owner_recovery_hash', await sha256hex(recovery.replace(/-/g, '')));
+    return json({ ok: true, reset: had, recovery });
   }
 
   // 以下动作都要验口令
@@ -93,6 +111,12 @@ export async function onRequest(context) {
   if (!(await passOk(kv, pass))) return fail('口令不正确', 403);
 
   if (action === 'verify') return json({ ok: true });
+
+  if (action === 'regen-recovery') {
+    const recovery = genRecovery();
+    await kv.put('owner_recovery_hash', await sha256hex(recovery.replace(/-/g, '')));
+    return json({ ok: true, recovery });
+  }
 
   if (action === 'changepass') {
     const np = String(body.newPass || '');
