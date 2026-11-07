@@ -13,6 +13,7 @@ import subprocess
 import sys
 import urllib.request
 import urllib.error
+import urllib.parse
 
 UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}
 PARSE_JS = 'functions/api/parse.js'
@@ -116,6 +117,71 @@ def probe_video():
                 problems.append(f'视频探针 {name} 报错形状变了：{err[:120]}')
         except Exception:
             problems.append(f'视频探针 {name} 返回非 JSON：HTTP {st} {txt[:80]}')
+
+
+# ============ 直链可用性探针（站长要求：链签发出来 ≠ 能下载，必须真拉字节） ============
+UA_M = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'
+
+def fetch_status(url, headers=None, want_text=False):
+    """拉一小段字节，返回 (status, content_type, body_bytes_or_text)。"""
+    import urllib.error
+    h = {'User-Agent': UA_M, 'Range': 'bytes=0-1023'}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            body = r.read(4096)
+            return r.status, (r.headers.get('Content-Type') or ''), (body.decode('utf-8', 'ignore') if want_text else body)
+    except urllib.error.HTTPError as e:
+        return e.code, ((e.headers.get('Content-Type') if e.headers else '') or ''), ('' if want_text else b'')
+    except Exception:
+        return 0, '', ('' if want_text else b'')
+
+
+def probe_usability():
+    # 无凭证可完整验的链路：视频 4 家（解析→拉字节）+ 阿里列目录链（取链需凭证，验到列表层）
+    video_samples = [
+        ('抖音', 'https://v.douyin.com/N02ol18iCT0/'),
+        ('快手', 'https://v.kuaishou.com/5fkjkb'),
+        ('微博', 'https://weibo.com/1642591402/J19gv3CXz'),
+        ('AcFun', 'https://www.acfun.cn/v/ac48954407'),
+    ]
+    for name, link in video_samples:
+        st, txt = http(BASE + '/api/video', method='POST', data={'text': link}, timeout=90)
+        try:
+            d = json.loads(txt)
+        except Exception:
+            problems.append(f'直链可用性 {name}：解析接口返回非 JSON HTTP {st}')
+            continue
+        if not d.get('ok'):
+            problems.append(f'直链可用性 {name}：样本解析失败（样本可能已失效或口径变了）：{str(d.get("error"))[:100]}')
+            continue
+        headers = {'Referer': d['needReferer']} if d.get('needReferer') else None
+        u = d.get('url') or ''
+        if d.get('type') == 'hls' or '.m3u8' in u:
+            s2, _ct, manifest = fetch_status(u, headers, want_text=True)
+            segs = [ln.strip() for ln in str(manifest).splitlines() if ln.strip() and not ln.startswith('#')]
+            if s2 != 200 or '#EXTM3U' not in str(manifest) or not segs:
+                problems.append(f'直链可用性 {name}：m3u8 清单拉不到或无分片 HTTP {s2}')
+                continue
+            seg = segs[0] if segs[0].startswith('http') else urllib.parse.urljoin(u, segs[0])
+            s3, ct3, _b = fetch_status(seg, headers)
+            if s3 not in (200, 206):
+                problems.append(f'直链可用性 {name}：清单可达但分片拉不动 HTTP {s3}（链不可用）')
+        else:
+            s2, ct2, _b = fetch_status(u, headers)
+            if s2 not in (200, 206) or 'text/html' in ct2:
+                problems.append(f'直链可用性 {name}：链已签发但拉字节失败 HTTP {s2} {ct2}（链不可用，检查是否缺 Referer 等请求头标注）')
+    # 阿里：匿名 token→列目录链（取直链需访客自己的 Authorization，自动监测到列表层为止）
+    st, txt = http(BASE + '/api/parse', method='POST',
+                   data={'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/KsbSSdhkSvN', 'cred': {}}, timeout=60)
+    try:
+        d = json.loads(txt)
+        if not d.get('ok') or not d.get('files'):
+            problems.append(f'直链可用性 阿里：样本分享列目录失败（样本可能被取消或口径变了）：{str(d.get("error"))[:100]}')
+    except Exception:
+        problems.append(f'直链可用性 阿里：列目录返回非 JSON HTTP {st}')
 
 
 def read_config(src):
@@ -247,6 +313,7 @@ def main():
     probe_site()
     probe_structure()
     probe_video()
+    probe_usability()
     mechanical_fixes()
     if fixes:
         commit_and_deploy()
