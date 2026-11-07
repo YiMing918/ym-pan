@@ -289,12 +289,21 @@ function detectDrive(text){ for(const d of DRIVES){ if(d.re.test(text)) return d
 const cg=$('#credGrid');
 for(const c of CREDS){
   const div=document.createElement('div');
-  div.innerHTML=`<label>${c.label}</label>`;
+  div.innerHTML=`<label>${c.label} <span id="vh_${c.key}" style="color:var(--ok,#2a9d5c)"></span></label>`;
   const inp=document.createElement('input'); inp.type='text'; inp.id='cred_'+c.key; inp.placeholder=c.ph; inp.autocomplete='off';
   inp.value=localStorage.getItem(credKey(c.key))||'';
   div.appendChild(inp); cg.appendChild(div);
 }
-$('#btnSaveCred').onclick=()=>{ for(const c of CREDS){ saveCredField(c.key, $('#cred_'+c.key).value.trim()); } toast('凭证已保存在本机浏览器'); };
+$('#btnSaveCred').onclick=async ()=>{
+  for(const c of CREDS){ saveCredField(c.key, $('#cred_'+c.key).value.trim()); }
+  if(localStorage.getItem('ympan_owner_pass')){
+    const n = await vaultSaveAll(true);
+    toast(n > 0 ? `凭证已保存，并同步到保险箱（${n} 家）` : '凭证已保存在本机浏览器');
+    refreshOwner();
+  } else {
+    toast('凭证已保存在本机浏览器');
+  }
+};
 $('#btnClearCred').onclick=()=>{ for(const c of CREDS){ localStorage.removeItem(credKey(c.key)); $('#cred_'+c.key).value=''; } toast('已清空'); };
 
 function extractFromText(t){
@@ -537,6 +546,7 @@ async function refreshOwner(){
         info += '　清除：' + d.vaulted.map(v=>`<a href="javascript:void(0)" data-unvault="${v}">${DRIVE_NAME[v]||v}</a>`).join(' ');
       }
       $('#ownerVaultInfo').innerHTML = info;
+      markVaultStates(d.vaulted);
       document.querySelectorAll('[data-unvault]').forEach(a=>{ a.onclick = async ()=>{
         const op = localStorage.getItem('ympan_owner_pass');
         if(!op) return toast('先解锁再清除');
@@ -593,23 +603,33 @@ $('#btnUnlock').onclick = async ()=>{
   refreshOwner();
 };
 $('#btnLock').onclick = ()=>{ localStorage.removeItem('ympan_owner_pass'); toast('已锁定'); refreshOwner(); };
-$('#btnVaultSave').onclick = async ()=>{
+async function vaultSaveAll(silent){
   const op = localStorage.getItem('ympan_owner_pass');
-  if(!op) return toast('先解锁再存');
+  if(!op){ if(!silent) toast('先解锁再存'); return 0; }
   const byDrive = {};
   for(const c of CREDS){
     const v = ($('#cred_'+c.key)?.value || '').trim();
     if(v) (byDrive[c.drive] = byDrive[c.drive] || {})[c.key] = v;
   }
   const drives = Object.keys(byDrive);
-  if(!drives.length) return toast('上面凭证表里没有已填的凭证，先填再存');
+  if(!drives.length){ if(!silent) toast('上面凭证表里没有已填的凭证，先填再存'); return 0; }
   let okN = 0;
   for(const dv of drives){
     const d = await ownerApi({ action:'vault', pass:op, drive:dv, cred:byDrive[dv] });
     if(d.ok) okN++;
   }
-  $('#ownerMsg').textContent = `已存进保险箱 ${okN}/${drives.length} 家。`;
-  refreshOwner();
+  return okN;
+}
+function markVaultStates(vaulted){
+  const set = new Set(vaulted || []);
+  for(const c of CREDS){
+    const el = $('#vh_'+c.key);
+    if(el) el.textContent = set.has(c.drive) ? '· 保险箱已同步 ✓' : '';
+  }
+}
+$('#btnVaultSave').onclick = async ()=>{
+  const okN = await vaultSaveAll(false);
+  if(okN > 0){ $('#ownerMsg').textContent = `已存进保险箱 ${okN} 家。`; refreshOwner(); }
 };
 $('#btnChangePass').onclick = ()=>{ const r=$('#ownerChangeRow'); r.style.display = r.style.display==='none' ? 'flex' : 'none'; };
 $('#btnDoChangePass').onclick = async ()=>{
