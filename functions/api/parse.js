@@ -738,6 +738,31 @@ export async function onRequest(context) {
     if (typeof v === 'string' && v.trim()) reqCred[k] = v;
   }
   body.cred = { ...envCreds(env), ...reqCred };
+  // 站长保险箱兜底：请求带正确站长口令（x-owner-pass）时，用保险箱存的凭证补齐本次没带的；
+  // 夸克未单独存保险箱时，再兜底用扫码绑定的巡检 Cookie。保险箱异常绝不影响正常解析。
+  try {
+    const op = request.headers.get('x-owner-pass');
+    const kv = env.PAN_KV;
+    if (op && kv) {
+      const oh = await kv.get('owner_hash');
+      if (oh) {
+        const dig = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(op));
+        const hex = [...new Uint8Array(dig)].map(x => x.toString(16).padStart(2, '0')).join('');
+        if (hex === oh) {
+          let vc = null;
+          const raw = await kv.get('vault_' + drive);
+          if (raw) { try { vc = JSON.parse(raw); } catch { vc = null; } }
+          if (!vc && drive === 'quark') {
+            const c = await kv.get('quark_cookie');
+            if (c) vc = { quarkCookie: c };
+          }
+          if (vc) for (const [k, v] of Object.entries(vc)) {
+            if (typeof v === 'string' && v && !body.cred[k]) body.cred[k] = v;
+          }
+        }
+      }
+    }
+  } catch { /* 保险箱兜底失败就当没存过 */ }
   try {
     if (body.action === 'download') {
       if (!adapter.download) return fail('该盘是单文件直达，没有单独的取链步骤');
