@@ -5,6 +5,7 @@
 其余异常在仓库开/更新一个 watchdog 标签的 Issue 留痕。全好则关掉旧 Issue。
 站点地址：优先读 Secrets 里的 SITE_URL，没配就用 https://<仓库名>.pages.dev。
 """
+import datetime
 import json
 import os
 import re
@@ -70,6 +71,12 @@ def probe_structure():
         ('guangya', {'drive': 'guangya', 'action': 'list', 'url': 'https://www.guangyapan.com/s/abc_def', 'cred': {}}, '筹备中'),
         ('pan123', {'drive': 'pan123', 'action': 'list', 'url': 'https://www.123pan.com/s/AbC-123', 'cred': {}}, None),
         ('lanzou', {'drive': 'lanzou', 'action': 'list', 'url': 'https://www.lanzoui.com/iAbCdEf', 'cred': {}}, None),
+        ('aliyun', {'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/abcdef', 'cred': {}}, '没认出阿里云盘分享链接'),
+        ('uc', {'drive': 'uc', 'action': 'list', 'url': 'https://drive.uc.cn/s/abcdef', 'cred': {}}, 'Cookie'),
+        ('cmcc', {'drive': 'cmcc', 'action': 'list', 'url': 'https://yun.139.com/shareweb/#/w/i/abcdef', 'cred': {}}, '没认出移动云盘分享'),
+        ('ctyun', {'drive': 'ctyun', 'action': 'list', 'url': 'https://cloud.189.cn/t/abcdef', 'cred': {}}, '没认出天翼分享链接'),
+        ('feijipan', {'drive': 'feijipan', 'action': 'list', 'url': 'https://share.feijipan.com/s/abcdef', 'cred': {}}, '没认出小飞机'),
+        ('xunlei', {'drive': 'xunlei', 'action': 'list', 'url': 'https://pan.xunlei.com/s/abcdef', 'cred': {}}, '没认出迅雷分享链接'),
     ]
     for name, payload, expect in cases:
         st, txt = http(BASE + '/api/parse', method='POST', data=payload)
@@ -192,12 +199,31 @@ def report_issue():
         sh('gh', 'issue', 'close', open_no)
 
 
+def heartbeat():
+    """心跳保活：GitHub 会停掉 60 天无活动的公开仓库的定时任务。若距上次提交超过 25 天且本轮没有修复提交，留一个时间戳提交保持活跃（不触发部署，代码没变）。"""
+    try:
+        ts = int(sh('git', 'log', '-1', '--format=%ct', capture_output=True, text=True).stdout.strip() or 0)
+    except Exception:
+        ts = 0
+    import time
+    if ts and time.time() - ts > 25 * 86400:
+        os.makedirs('.watchdog', exist_ok=True)
+        with open('.watchdog/last-run.txt', 'w') as f:
+            f.write(datetime.date.today().isoformat() + '\n')
+        sh('git', 'add', '.watchdog/last-run.txt')
+        sh('git', 'commit', '-m', 'watchdog: 心跳保活')
+        sh('git', 'push')
+        notes.append('已留心跳保活提交')
+
+
 def main():
     probe_site()
     probe_structure()
     mechanical_fixes()
     if fixes:
         commit_and_deploy()
+    else:
+        heartbeat()
     report_issue()
     print(json.dumps({'problems': problems, 'fixes': fixes, 'notes': notes}, ensure_ascii=False, indent=1))
     return 0
