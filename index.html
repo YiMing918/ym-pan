@@ -62,7 +62,7 @@ ol.howto li{margin:3px 0}
 <div class="wrap">
 <header>
   <h1>YM 网盘解析 <span class="badge">只要直链版</span></h1>
-  <div class="sub">粘贴分享链接 → 拿直链 → 交给 1DM+ / ADM / aria2 下载。本站只产直链、不中转流量；解析用的是<b>你自己账号</b>的凭证。</div>
+  <div class="sub">粘贴分享链接 → 拿直链 → 交给 1DM+ / ADM / aria2 下载。本站只产直链、不中转流量；解析用的是<b>你自己账号</b>的凭证。页面下方还有 <b>④ 视频解析</b>（短视频去水印，免登录）。</div>
 </header>
 
 <section class="card" id="cParse">
@@ -138,6 +138,33 @@ ol.howto li{margin:3px 0}
   <div class="health" id="healthGrid" style="margin-top:10px"></div>
 </section>
 
+<section class="card" id="cVideo">
+  <h2>④ 视频解析 <span class="badge">去水印 · 免登录</span></h2>
+  <div class="drives" id="vDrives"></div>
+  <div class="row" style="margin-top:10px">
+    <div class="f1"><input type="text" id="inVUrl" placeholder="粘贴短视频分享链接（整段分享文案也行）：抖音 / 快手 / 微博 / 小红书 / AcFun / B站 / TikTok / 即梦"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="btn" id="btnVideo">解析</button>
+    <span class="small" id="vRoute"></span>
+  </div>
+  <div class="msg" id="videoMsg"></div>
+  <div id="vResult" style="display:none;margin-top:10px">
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      <img id="vCover" alt="" style="width:92px;height:124px;object-fit:cover;border-radius:10px;display:none;background:var(--card2)">
+      <div style="flex:1;min-width:0">
+        <div id="vTitle" style="font-weight:600;word-break:break-all"></div>
+        <div class="small" id="vMeta"></div>
+        <div class="hint" id="vNote" style="display:none"></div>
+      </div>
+    </div>
+    <div id="vQualities" style="margin-top:10px;display:grid;gap:6px"></div>
+    <div id="vImages" style="margin-top:10px"></div>
+    <div id="vEmbed" style="margin-top:10px;display:none"></div>
+  </div>
+  <div class="hint">视频解析只回直链、不中转流量；多数平台免登录。B站未登录清晰度到 720p（双流）/480p（单文件），AcFun 是 m3u8 流，TikTok 与即梦为实验，YouTube 服务器端拿不到直链（平台机器人墙），会如实说明并给官方播放地址。</div>
+</section>
+
 <section class="card" id="cNote">
   <h2>本站怎么运作</h2>
   <ol class="howto">
@@ -147,6 +174,7 @@ ol.howto li{margin:3px 0}
     <li><b>部分直链要带请求头</b>：百度要带 UA + 你的 BDUSS，夸克/UC 要带 Cookie，阿里要带 Referer。结果区会给出「链接+请求头」和现成的 aria2 命令，粘进下载器即可；1DM+ 在新建任务里能填请求头。</li>
     <li><b>实验支持的盘</b>：移动、天翼、小飞机、123、迅雷接口变动频繁，已按在维护的开源项目口径实现，但可能需要按报错迭代。光鸭官方分享接口未公开，筹备中，不上假接口。</li>
     <li><b>已知边界</b>：超大文件在夸克/UC 会先转存进你自己网盘再取链（会占你空间，可事后删）；百度风控最重，日解析量过大（社区口径约 200–300GB）会当日限流。</li>
+    <li><b>视频解析</b>：与网盘同一套路——只回直链不中转、多路线互备（快手双主机、TikTok 双路线）、每天巡检。图集回原图，B站双流要自己合并，AcFun 的 m3u8 用下载器保存。</li>
     <li><b>自动巡检</b>：仓库带看门狗，每天自动检查各家接口、能机械修的自己修（域名/路线级），其余异常在仓库 Issues 留痕；部署者还可以扫码绑定夸克巡检凭证，做真解析级自检。详见仓库 MAINTENANCE.md。</li>
   </ol>
 </section>
@@ -428,6 +456,59 @@ $('#btnHealth').onclick=async()=>{
     $('#healthGrid').innerHTML=(d.health||[]).map(h=>`<div>${h.reachable?'🟢':'🔴'} ${h.name}<br><span class="small">HTTP ${h.status||'无响应'}</span></div>`).join('');
   }catch(e){ $('#healthGrid').innerHTML='<div class="small">自检失败：'+e.message+'</div>'; }
 };
+
+/* video section */
+const VPLATFORMS=[['抖音',''],['快手',''],['微博',''],['小红书',''],['AcFun',''],['B站',''],['TikTok','实验'],['即梦','实验'],['YouTube','不支持直链']];
+const vw=$('#vDrives');
+for(const [n,t] of VPLATFORMS){
+  const b=document.createElement('span'); b.className='dchip'; b.style.cursor='default';
+  b.innerHTML=n+(t?`<span class="t2">${t}</span>`:'');
+  vw.appendChild(b);
+}
+function vmsg(kind, text){ const el=$('#videoMsg'); el.className='msg '+(kind||''); el.textContent=text||''; if(!text) el.style.display='none'; }
+$('#btnVideo').onclick=async()=>{
+  const text=$('#inVUrl').value.trim();
+  if(!text){ vmsg('err','先粘贴分享链接或整段分享文案'); return; }
+  const btn=$('#btnVideo'); btn.disabled=true; vmsg('', '解析中…'); $('#vResult').style.display='none'; $('#vRoute').textContent='';
+  try{
+    const r=await fetch('/api/video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const d=await r.json();
+    if(!d.ok){
+      vmsg('err', d.error||'解析失败');
+      if(d.embed){ $('#vResult').style.display='block'; $('#vCover').style.display='none'; $('#vTitle').textContent='YouTube'; $('#vMeta').textContent=''; $('#vQualities').innerHTML=''; $('#vImages').innerHTML=''; const em=$('#vEmbed'); em.style.display='block'; em.innerHTML=`<a href="${d.watch}" target="_blank" rel="noopener">▶ 在 YouTube 打开</a>`; }
+      return;
+    }
+    vmsg('ok', `✅ ${d.platformName||''} 解析成功`);
+    $('#vRoute').textContent=d.route?('路线：'+d.route):'';
+    $('#vResult').style.display='block';
+    const cov=$('#vCover');
+    if(d.cover){ cov.src=d.cover; cov.style.display='block'; } else cov.style.display='none';
+    $('#vTitle').textContent=d.title||'(无标题)';
+    $('#vMeta').textContent=[d.author?('作者：'+d.author):'', d.type==='image'?'类型：图文':d.type==='hls'?'类型：m3u8 流':'类型：视频'].filter(Boolean).join(' · ');
+    const vn=$('#vNote');
+    if(d.note){ vn.textContent=d.note; vn.style.display='block'; } else vn.style.display='none';
+    const q=$('#vQualities'); q.innerHTML='';
+    for(const it of (d.qualities||[])){
+      const row=document.createElement('div'); row.className='linkbox'; row.style.display='flex'; row.style.gap='8px'; row.style.alignItems='center';
+      const lab=document.createElement('span'); lab.className='badge'; lab.textContent=it.label; row.appendChild(lab);
+      const a=document.createElement('a'); a.href=it.url; a.target='_blank'; a.rel='noopener'; a.textContent='打开直链'; a.style.whiteSpace='nowrap'; row.appendChild(a);
+      const c=document.createElement('button'); c.className='ghost'; c.textContent='复制'; c.onclick=()=>copyText(it.url,'已复制直链'); row.appendChild(c);
+      if(d.needReferer){ const c2=document.createElement('button'); c2.className='ghost'; c2.textContent='复制「链接+请求头」'; c2.onclick=()=>copyText(it.url+'\nReferer: '+d.needReferer,'已复制（含 Referer）'); row.appendChild(c2); }
+      const u=document.createElement('span'); u.className='small'; u.style.wordBreak='break-all'; u.textContent=it.url; row.appendChild(u);
+      q.appendChild(row);
+    }
+    const im=$('#vImages'); im.innerHTML='';
+    if(d.images && d.images.length){
+      const grid=document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='repeat(auto-fill,minmax(96px,1fr))'; grid.style.gap='6px';
+      d.images.forEach((u,ix)=>{ const a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener'; const img=document.createElement('img'); img.src=u; img.alt='图 '+(ix+1); img.style.width='100%'; img.style.height='96px'; img.style.objectFit='cover'; img.style.borderRadius='8px'; a.appendChild(img); grid.appendChild(a); });
+      im.appendChild(grid);
+      const cp=document.createElement('button'); cp.className='ghost'; cp.style.marginTop='8px'; cp.textContent='复制全部原图链接'; cp.onclick=()=>copyText(d.images.join('\n'),'已复制全部原图链接'); im.appendChild(cp);
+    }
+    $('#vEmbed').style.display='none';
+  }catch(e){ vmsg('err','网络错误：'+e.message); }
+  btn.disabled=false;
+};
+$('#inVUrl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#btnVideo').click(); });
 </script>
 </body>
 </html>
