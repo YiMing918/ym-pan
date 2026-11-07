@@ -52,7 +52,9 @@ async function start(request, env) {
   await kv.put('qr_pending', JSON.stringify({ token, requestId }), { expirationTtl: 300 });
   return json({
     ok: true, token,
-    qr: `https://su.quark.cn/4_eMHBJ?token=${encodeURIComponent(token)}&client_id=${CLIENT_ID}&ssb=`,
+    // 二维码内容格式照 xiaoya-alist 久经验证的实现：ssb 必须为 weblogin 且要带 uc_biz_str，
+    // 否则夸克 App 扫码后会直接报「登录请求已过期」（2026-11-07 站长实测踩坑）。
+    qr: `https://su.quark.cn/4_eMHBJ?token=${encodeURIComponent(token)}&client_id=${CLIENT_ID}&ssb=weblogin&uc_param_str=&uc_biz_str=S%3Acustom%7COPT%3ASAREA%400%7COPT%3AIMMERSIVE%401%7COPT%3ABACK_BTN_STYLE%400`,
   });
 }
 
@@ -69,7 +71,9 @@ async function poll(env) {
   const text = JSON.stringify(data || {});
   const ticketM = text.match(/"service_ticket"\s*:\s*"([^"]+)"/);
   if (!ticketM) {
-    const scanned = /"status"\s*:\s*(20000|50000)/.test(text) || /scan/i.test(text);
+    // 上游状态码（xiaoya-alist 实现注）：50004001 等待扫码、50004002 无效或已过期
+    if (/"status"\s*:\s*50004002/.test(text)) return json({ ok: true, state: 'expired' });
+    const scanned = /"status"\s*:\s*(20000|50000|50004003)/.test(text) || /scan/i.test(text);
     return json({ ok: true, state: scanned ? 'scanned' : 'waiting' });
   }
   // 拿到 service ticket → 换登录 Cookie
