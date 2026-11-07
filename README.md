@@ -29,7 +29,7 @@
 | 网盘 | 级别 | 需要的凭证 | 备注 |
 |---|---|---|---|
 | 百度网盘 | 主力 | BDUSS | 直链下载须带专用 UA + BDUSS |
-| 阿里云盘 | 主力 | 可匿名（填 Authorization 更稳） | 直链带 Referer 校验 |
+| 阿里云盘 | 主力 | 列目录可匿名；取直链需自己的 Authorization | 直链带 Referer 校验 |
 | 夸克网盘 | 主力 | 整段 Cookie | 大文件自动转存后取链；`__puus` 自动轮换回写 |
 | UC 网盘 | 主力 | 整段 Cookie | 与夸克同系双网关 |
 | 蓝奏云 | 主力 | 免登录 | 多个官方域名同码互备；单文件约 100MB 上限 |
@@ -63,7 +63,7 @@
 本站函数（`functions/api/parse.js`）在服务端替你走各家网页版/官方接口的标准流程，浏览器不直连网盘（避开跨域），凭证只出现在你与本站之间的请求里：
 
 - **百度**：GET 分享页取 `sign/timestamp/shareid`（顺手拿 `PANPSC`）→ POST `share/verify` 验提取码得 `randsk` → `share/list` 列目录 → `api/sharedownload` 取 `dlink`。下载端须带 `netdisk` UA 与 BDUSS。
-- **阿里**：`get_share_token`（匿名+提取码）→ `list_by_share` → `get_share_link_download_url`；填了自己的 Authorization 会一并带上。
+- **阿里**：`get_share_token`（匿名+提取码）→ `list_by_share` → `get_share_link_download_url`；实测匿名只能列目录，取直链必须带自己的 Authorization（未填时页面会明确提示）。
 - **夸克 / UC**：`sharepage/token` 拿 `stoken` → `sharepage/detail` 列目录 → 小文件 `file/download` 直取；大文件先 `sharepage/save` 转存进你自己盘根目录再取链（转存物可事后删）。响应里的新 Cookie（`__puus` 轮换）会回吐给页面自动更新本地凭证。
 - **蓝奏**：分享页 → iframe 子页提取 `sign` → POST `ajaxm.php?action=downprocess` 得 `dom + url` 拼直链；主域名失败自动换其他官方等价域名同码重试。
 - **移动**：`share-kd-njs` 的 `getOutLinkInfoV6` 列目录、`dlFromOutLinkV3` 取链。
@@ -155,6 +155,7 @@ A：先跑「接口自检」：接口不通是该家在维护/封 IP 段，等�
 
 ## 版本历史
 
+- **v1.2.8（2026-11-07）**：可用性监测批（站长指出「链出来 ≠ 能下载」）：看门狗新增直链可用性探针——抖音/快手/微博/AcFun 固定样本真解析后拉字节验活（微博按结果自带 Referer、AcFun 验清单+分片）、阿里公开样本验匿名列目录链；巡检的拉字节结果纳入每日自检。另实测修正阿里口径：匿名只能列目录、取直链必须填自己的 Authorization（页面文案与报错已改实）。
 - **v1.2.7（2026-11-07）**：直链可用性实测批（站长要求验「链能不能下」而不是只看签发）：抖音/快手直链实拉字节通过（206 + mp4 文件头）；微博直链必须带 Referer 才给下（无则 403），解析结果已补 Referer 标注；AcFun 的 m3u8 分片实拉通过（206 TS）；巡检新增「签发后拉字节」一步，链拉不动也会报出来。
 - **v1.2.6（2026-11-07）**：巡检补转存路线：真解析巡检实测发现测试分享的小文件直取被夸克拒（21001），正式解析本来就会自动转存后取链——巡检同步升级为直取失败自动走同一条转存路线并清理转存件，验的才是用户实际走的路。站长扫码绑定已完成，巡检全链路打通。
 - **v1.2.5（2026-11-07）**：修夸克扫码「刚扫就过期」：二维码内容格式照 xiaoya-alist 久经验证的实现补全 `ssb=weblogin` 与 `uc_biz_str` 参数（此前 ssb 为空，夸克 App 一扫就报登录请求已过期）；轮询补认上游过期状态码 50004002。
