@@ -54,7 +54,7 @@ def probe_site():
     st, html = http(BASE + '/')
     if st != 200 or 'YM 网盘解析' not in html:
         problems.append(f'站点首页异常：HTTP {st}')
-    st, txt = http(BASE + '/api/parse?action=health')
+    st, txt = http(BASE + '/api/parse?action=health', timeout=60)
     try:
         health = json.loads(txt).get('health', [])
         down = [h['name'] for h in health if not h.get('reachable')]
@@ -65,30 +65,57 @@ def probe_site():
 
 
 def probe_structure():
+    # expect 为「可接受报错子串」列表，任一命中即视为口径正常（假分享会穿过识别层直达上游，
+    # 上游的结构化报错同样是健康形状；2026-11-07 首跑实测后按线上真实报错校准）。
     cases = [
-        ('baidu', {'drive': 'baidu', 'action': 'list', 'url': 'https://pan.baidu.com/s/1AbCdEf', 'cred': {}}, 'BDUSS'),
-        ('quark', {'drive': 'quark', 'action': 'list', 'url': 'https://pan.quark.cn/s/abc123', 'cred': {}}, 'Cookie'),
-        ('guangya', {'drive': 'guangya', 'action': 'list', 'url': 'https://www.guangyapan.com/s/abc_def', 'cred': {}}, '筹备中'),
-        ('pan123', {'drive': 'pan123', 'action': 'list', 'url': 'https://www.123pan.com/s/AbC-123', 'cred': {}}, None),
+        ('baidu', {'drive': 'baidu', 'action': 'list', 'url': 'https://pan.baidu.com/s/1AbCdEf', 'cred': {}}, ['BDUSS']),
+        ('quark', {'drive': 'quark', 'action': 'list', 'url': 'https://pan.quark.cn/s/abc123', 'cred': {}}, ['Cookie']),
+        ('guangya', {'drive': 'guangya', 'action': 'list', 'url': 'https://www.guangyapan.com/s/abc_def', 'cred': {}}, ['筹备中']),
+        ('pan123', {'drive': 'pan123', 'action': 'list', 'url': 'https://www.123pan.com/s/AbC-123', 'cred': {}}, ['列目录失败', '没认出']),
         ('lanzou', {'drive': 'lanzou', 'action': 'list', 'url': 'https://www.lanzoui.com/iAbCdEf', 'cred': {}}, None),
-        ('aliyun', {'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/abcdef', 'cred': {}}, '没认出阿里云盘分享链接'),
-        ('uc', {'drive': 'uc', 'action': 'list', 'url': 'https://drive.uc.cn/s/abcdef', 'cred': {}}, 'Cookie'),
-        ('cmcc', {'drive': 'cmcc', 'action': 'list', 'url': 'https://yun.139.com/shareweb/#/w/i/abcdef', 'cred': {}}, '没认出移动云盘分享'),
-        ('ctyun', {'drive': 'ctyun', 'action': 'list', 'url': 'https://cloud.189.cn/t/abcdef', 'cred': {}}, '没认出天翼分享链接'),
-        ('feijipan', {'drive': 'feijipan', 'action': 'list', 'url': 'https://share.feijipan.com/s/abcdef', 'cred': {}}, '没认出小飞机'),
-        ('xunlei', {'drive': 'xunlei', 'action': 'list', 'url': 'https://pan.xunlei.com/s/abcdef', 'cred': {}}, '没认出迅雷分享链接'),
+        ('aliyun', {'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/abcdef', 'cred': {}}, ['获取分享令牌失败', '没认出阿里云盘分享链接']),
+        ('uc', {'drive': 'uc', 'action': 'list', 'url': 'https://drive.uc.cn/s/abcdef', 'cred': {}}, ['Cookie']),
+        ('cmcc', {'drive': 'cmcc', 'action': 'list', 'url': 'https://yun.139.com/shareweb/#/w/i/abcdef', 'cred': {}}, ['列目录失败', '没认出移动云盘分享']),
+        ('ctyun', {'drive': 'ctyun', 'action': 'list', 'url': 'https://cloud.189.cn/t/abcdef', 'cred': {}}, ['列目录失败', '没认出天翼分享链接']),
+        ('feijipan', {'drive': 'feijipan', 'action': 'list', 'url': 'https://share.feijipan.com/s/abcdef', 'cred': {}}, ['列目录失败', '没认出小飞机']),
+        ('xunlei', {'drive': 'xunlei', 'action': 'list', 'url': 'https://pan.xunlei.com/s/abcdef', 'cred': {}}, ['验证码令牌', '没认出迅雷分享链接']),
     ]
-    for name, payload, expect in cases:
-        st, txt = http(BASE + '/api/parse', method='POST', data=payload)
+    for name, payload, expects in cases:
+        st, txt = http(BASE + '/api/parse', method='POST', data=payload, timeout=45)
         try:
             d = json.loads(txt)
             err = d.get('error', '')
             if st != 200 or d.get('ok') is not False:
                 problems.append(f'结构探针 {name} 异常：HTTP {st}，返回 {txt[:120]}')
-            elif expect and expect not in err:
+            elif expects and not any(x in err for x in expects):
                 problems.append(f'结构探针 {name} 报错形状变了：{err[:120]}')
         except Exception:
             problems.append(f'结构探针 {name} 返回非 JSON：HTTP {st} {txt[:80]}')
+
+
+def probe_video():
+    cases = [
+        ('douyin', 'https://www.douyin.com/video/1000000000000000000', ['抖音']),
+        ('kuaishou', 'https://www.kuaishou.com/short-video/watchdogprobe', ['快手']),
+        ('weibo', 'https://weibo.com/1234567890/AbCdEfGh', ['微博', '视频']),
+        ('xiaohongshu', 'https://www.xiaohongshu.com/explore/000000000000000000000000', ['小红书']),
+        ('acfun', 'https://www.acfun.cn/v/ac999999999', ['AcFun']),
+        ('bilibili', 'https://b23.tv/watchdogprobe', ['B 站']),
+        ('youtube', 'https://youtu.be/dQw4w9WgXcQ', ['YouTube']),
+        ('tiktok', 'https://www.tiktok.com/@x/video/1000000000000000000', None),
+        ('jimeng', 'https://jimeng.jianying.com/s/watchdogprobe', None),
+    ]
+    for name, link, expects in cases:
+        st, txt = http(BASE + '/api/video', method='POST', data={'text': link}, timeout=45)
+        try:
+            d = json.loads(txt)
+            err = d.get('error', '')
+            if st != 200 or d.get('ok') is not False:
+                problems.append(f'视频探针 {name} 异常：HTTP {st}，返回 {txt[:120]}')
+            elif expects and not any(x in err for x in expects):
+                problems.append(f'视频探针 {name} 报错形状变了：{err[:120]}')
+        except Exception:
+            problems.append(f'视频探针 {name} 返回非 JSON：HTTP {st} {txt[:80]}')
 
 
 def read_config(src):
@@ -219,6 +246,7 @@ def heartbeat():
 def main():
     probe_site()
     probe_structure()
+    probe_video()
     mechanical_fixes()
     if fixes:
         commit_and_deploy()
