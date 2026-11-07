@@ -255,6 +255,7 @@ function weiboFromStatus(d, route) {
     platform: 'weibo', type: 'video', route,
     title: (st.text_raw || '').slice(0, 80), author: (st.user && st.user.screen_name) || '',
     cover: pi.page_pic || '', url: qualities[0].url, qualities,
+    needReferer: 'https://weibo.com/', note: '微博直链下载必须带 Referer（下方「链接+请求头」已配好），直接点开会 403',
   };
 }
 
@@ -280,7 +281,7 @@ async function parseWeibo(rawUrl) {
         const urls = comp.urls || {};
         for (const [label, u] of Object.entries(urls)) if (u) qualities.push({ label, url: String(u).replace(/^\/\//, 'https://') });
         if (!qualities.length && comp.stream_url) qualities.push({ label: '高清', url: comp.stream_url });
-        if (qualities.length) return { platform: 'weibo', type: 'video', route: 'tv 组件接口', title: comp.title || '', author: '', cover: comp.cover_image || '', url: qualities[0].url, qualities };
+        if (qualities.length) return { platform: 'weibo', type: 'video', route: 'tv 组件接口', title: comp.title || '', author: '', cover: comp.cover_image || '', url: qualities[0].url, qualities, needReferer: 'https://weibo.com/', note: '微博直链下载必须带 Referer（下方「链接+请求头」已配好），直接点开会 403' };
         if (comp.mid) { // 拿到 mid 走帖子通道继续
           const rr = await fetchText(`https://weibo.com/ajax/statuses/show?id=${comp.mid}&locale=zh-CN&isGetLongText=true`, { ua: UA_DESKTOP, headers: { 'X-Requested-With': 'XMLHttpRequest', Referer: 'https://weibo.com/', ...(cookie ? { Cookie: cookie } : {}) } });
           return weiboFromStatus(JSON.parse(rr.text), 'tv 组件→帖子接口');
