@@ -112,6 +112,20 @@ ol.howto li{margin:3px 0}
     <button class="ghost" id="btnClearCred">清空全部</button>
   </div>
   <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+    <div style="font-size:14px;margin-bottom:6px">扫码登录 <span class="badge ok">免找 Cookie</span></div>
+    <div class="small">不想去浏览器里挖 Cookie，就用对应 App 扫码：登录凭证只回你这台浏览器、自动填进上面的表格（保险箱解锁时还会自动同步）。扫完记得马上在 App 里点「确认登录」。</div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" data-qrlogin="baidu">百度扫码登录</button>
+      <button class="ghost" data-qrlogin="quark">夸克扫码登录</button>
+      <button class="ghost" data-qrlogin="uc">UC 扫码登录</button>
+    </div>
+    <div id="qrLoginBox" style="display:none;margin-top:10px">
+      <div style="display:flex;justify-content:center"><canvas id="qrLoginCanvas" width="228" height="228" style="background:#fff;border-radius:10px"></canvas><img id="qrLoginImg" alt="登录二维码" width="228" height="228" style="display:none;background:#fff;border-radius:10px"></div>
+      <div class="small" id="qrLoginMsg" style="text-align:center;margin-top:6px"></div>
+      <div class="row" style="justify-content:center;margin-top:6px"><button class="ghost" id="btnQrLoginCancel">取消</button></div>
+    </div>
+  </div>
+  <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
     <div style="font-size:14px;margin-bottom:6px">夸克巡检凭证（扫码绑定）<span class="badge" id="qrState">检查中…</span></div>
     <div class="small">给「真解析自检」用的：用夸克 App 扫一次码，登录 Cookie 会存进本站的 KV（不在仓库里、也不进上面的凭证表）。巡检每天拿它真解析一个固定测试分享，哪天夸克口径变了能第一时间发现并修。它平时只用于巡检；你在下方保险箱输对口令后，也会用于你本人的夸克解析（免填 Cookie）。失效了重新扫一次即可。</div>
     <div class="row" style="margin-top:8px"><button class="ghost" id="btnQr">生成扫码二维码</button></div>
@@ -483,9 +497,9 @@ async function qrStatus(){
   }catch(e){ $('#qrState').textContent='未知'; }
 }
 qrStatus();
-function drawQr(text){
+function drawQr(text, sel){
   const qr=qrcode(0,'M'); qr.addData(text); qr.make();
-  const n=qr.getModuleCount(), cv=$('#qrCanvas'), ctx=cv.getContext('2d');
+  const n=qr.getModuleCount(), cv=$(sel||'#qrCanvas'), ctx=cv.getContext('2d');
   const cell=Math.floor(228/(n+2)), off=Math.floor((228-cell*n)/2);
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,228,228); ctx.fillStyle='#000';
   for(let r=0;r<n;r++) for(let c=0;c<n;c++) if(qr.isDark(r,c)) ctx.fillRect(off+c*cell,off+r*cell,cell,cell);
@@ -520,6 +534,69 @@ $('#btnQr').onclick=async()=>{
   };
   cycle();
 };
+
+/* ===== 访客扫码登录（百度/夸克/UC） ===== */
+let qrLoginTimer = null;
+function stopQrLogin(msg){
+  if(qrLoginTimer){ clearTimeout(qrLoginTimer); qrLoginTimer = null; }
+  if(msg) $('#qrLoginMsg').textContent = msg;
+}
+async function startQrLogin(drive){
+  stopQrLogin();
+  const name = { baidu:'百度', quark:'夸克', uc:'UC' }[drive];
+  const box = $('#qrLoginBox'); box.style.display = 'block';
+  $('#qrLoginMsg').textContent = '正在生成二维码…';
+  $('#qrLoginCanvas').style.display = 'none'; $('#qrLoginImg').style.display = 'none';
+  let d;
+  try{
+    const r = await fetch(`/api/qrlogin?drive=${drive}&action=start`);
+    d = await r.json();
+  }catch(e){ $('#qrLoginMsg').textContent = '❌ 网络错误：' + e.message; return; }
+  if(!d.ok){ $('#qrLoginMsg').textContent = '❌ ' + (d.error || '生成失败'); return; }
+  if(d.qrImg){ const img = $('#qrLoginImg'); img.src = d.qrImg; img.style.display = 'block'; }
+  else { $('#qrLoginCanvas').style.display = 'block'; drawQr(d.qr, '#qrLoginCanvas'); }
+  const deadline = Date.now() + 4 * 60 * 1000;
+  $('#qrLoginMsg').textContent = `用${name} App 扫这张码，扫完马上在 App 里点「确认登录」`;
+  const poll = async () => {
+    if(Date.now() > deadline){ stopQrLogin('二维码等太久已停下，准备好后重新点扫码登录'); return; }
+    try{
+      const q = new URLSearchParams({ drive, action: 'poll' });
+      if(d.sign) q.set('sign', d.sign);
+      if(d.gid) q.set('gid', d.gid);
+      if(d.token) q.set('token', d.token);
+      if(d.requestId) q.set('requestId', d.requestId);
+      const r = await fetch('/api/qrlogin?' + q.toString());
+      const pd = await r.json();
+      if(pd.state === 'done'){
+        stopQrLogin();
+        for(const [k, v] of Object.entries(pd.cred || {})){
+          const inp = $('#cred_' + k);
+          if(inp) inp.value = v;
+          saveCredField(k, v);
+        }
+        let extra = '';
+        if(localStorage.getItem('ympan_owner_pass')){
+          const n = await vaultSaveAll(true);
+          if(n > 0) extra = '，并已同步进保险箱';
+          refreshOwner();
+        }
+        $('#qrLoginMsg').textContent = `✅ ${name}登录成功，凭证已保存${extra}`;
+        toast(`${name}登录成功`);
+        box.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if(pd.state === 'expired'){ stopQrLogin('二维码已过期，重新点一次扫码登录即可'); return; }
+      if(pd.state === 'error'){ stopQrLogin('❌ ' + (pd.error || '登录失败')); return; }
+      if(pd.state === 'scanned') $('#qrLoginMsg').textContent = '已扫码！现在就在 App 里点「确认登录」，别切走';
+    }catch(e){ /* 单次轮询失败不中断，继续等 */ }
+    qrLoginTimer = setTimeout(poll, drive === 'baidu' ? 500 : 2500);
+  };
+  qrLoginTimer = setTimeout(poll, 800);
+}
+for(const b of document.querySelectorAll('[data-qrlogin]')){
+  b.onclick = () => startQrLogin(b.dataset.qrlogin);
+}
+$('#btnQrLoginCancel').onclick = () => { stopQrLogin(); $('#qrLoginBox').style.display = 'none'; };
 
 /* ===== 站长保险箱 ===== */
 const DRIVE_NAME = Object.fromEntries(DRIVES.map(d=>[d.id,d.name]));
