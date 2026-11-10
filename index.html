@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>YM 网盘解析 · 只要直链</title>
+<meta name="description" content="自建网盘分享解析：用你自己账号的凭证调用各盘接口，只产直链不中转流量，配合 1DM+/ADM 等下载器使用。">
+<style>
+:root{--bg:#0f141b;--card:#171e28;--card2:#1d2634;--line:#2a3648;--txt:#e8eef6;--sub:#93a5bb;--acc:#4da3ff;--acc2:#2b7de0;--ok:#3ecf8e;--warn:#ffb648;--bad:#ff6b6b;--chip:#22304a}
+@media (prefers-color-scheme: light){:root{--bg:#f2f5f9;--card:#fff;--card2:#f4f7fb;--line:#dde5ee;--txt:#16222f;--sub:#5b6d82;--chip:#e7eef7}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:14px 12px 40px}
+header{padding:10px 2px 4px}
+h1{font-size:21px;margin:0 0 2px}
+.sub{color:var(--sub);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
+.card h2{font-size:15px;margin:0 0 10px}
+.drives{display:flex;flex-wrap:wrap;gap:7px}
+.dchip{border:1px solid var(--line);background:var(--chip);color:var(--txt);border-radius:999px;padding:6px 12px;font-size:13.5px;cursor:pointer}
+.dchip.on{background:var(--acc2);border-color:var(--acc2);color:#fff}
+.dchip .t2{font-size:11px;opacity:.75;margin-left:4px}
+.dchip .t0{font-size:11px;color:var(--warn);margin-left:4px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input[type=text],input[type=password],textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font-size:14.5px;outline:none}
+input:focus,textarea:focus{border-color:var(--acc)}
+textarea{resize:vertical;min-height:64px;font-size:13px}
+.f1{flex:1;min-width:200px}.f2{width:130px}
+button.btn{background:var(--acc2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;cursor:pointer}
+button.btn:disabled{opacity:.55}
+button.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer}
+button.ghost.on{border-color:var(--acc);color:var(--acc)}
+.hint{color:var(--sub);font-size:12.5px;margin-top:8px}
+.msg{margin-top:10px;font-size:13.5px;border-radius:10px;padding:9px 12px;display:none;white-space:pre-wrap;word-break:break-all}
+.msg.err{display:block;background:rgba(255,107,107,.12);color:var(--bad);border:1px solid rgba(255,107,107,.35)}
+.msg.okk{display:block;background:rgba(62,207,142,.10);color:var(--ok);border:1px solid rgba(62,207,142,.3)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.fname{word-break:break-all}
+.fsize{color:var(--sub);white-space:nowrap;font-size:12.5px}
+.scrollbox{max-height:380px;overflow:auto}
+.linkbox{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;word-break:break-all;font-size:13.5px}
+.kv{font-size:12.5px;color:var(--sub);white-space:pre-wrap;word-break:break-all;background:var(--card2);border:1px dashed var(--line);border-radius:10px;padding:9px 12px;margin-top:8px}
+details{margin-top:6px}
+summary{cursor:pointer;color:var(--acc);font-size:13.5px}
+.credgrid{display:grid;grid-template-columns:1fr;gap:10px}
+.credgrid label{font-size:13px;color:var(--sub);display:block;margin-bottom:4px}
+.badge{display:inline-block;font-size:11px;border-radius:6px;padding:1px 7px;background:var(--chip);color:var(--sub);margin-left:6px;vertical-align:2px}
+.badge.ok{color:var(--ok)} .badge.warn{color:var(--warn)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#222e3f;color:#fff;padding:9px 16px;border-radius:999px;font-size:13.5px;opacity:0;pointer-events:none;transition:.25s;z-index:50;max-width:92vw;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%)}
+a{color:var(--acc)}
+.small{font-size:12.5px;color:var(--sub)}
+ol.howto{margin:6px 0 0;padding-left:20px;font-size:13.5px}
+ol.howto li{margin:3px 0}
+.health{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;font-size:13px}
+.health div{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>YM 网盘解析 <span class="badge">只要直链版</span></h1>
+  <div class="sub">粘贴分享链接 → 拿直链 → 交给 1DM+ / ADM / aria2 下载。本站只产直链、不中转流量；解析用的是<b>你自己账号</b>的凭证。页面下方还有 <b>④ 视频解析</b>（短视频去水印，免登录）。</div>
+</header>
+
+<section class="card" id="cParse">
+  <h2>① 解析分享</h2>
+  <div class="drives" id="drives"></div>
+  <div class="row" style="margin-top:12px">
+    <div class="f1"><input type="text" id="inUrl" placeholder="粘贴分享链接（整段分享文字也行，提取码会自动认）"></div>
+    <div class="f2"><input type="text" id="inPwd" placeholder="提取码（可空）"></div>
+  </div>
+  <div class="row" style="margin-top:10px;align-items:center">
+    <button class="btn" id="btnParse">解析</button>
+    <button class="ghost" id="btnBack" style="display:none">← 返回上级</button>
+    <span class="small" id="routeInfo"></span>
+  </div>
+  <div class="msg" id="parseMsg"></div>
+  <div id="listWrap" style="display:none;margin-top:10px">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <span class="small" id="crumb"></span>
+      <span>
+        <button class="ghost" id="btnBatch">批量取链（勾选）</button>
+        <button class="ghost" id="btnCopyAll" style="display:none">复制全部直链</button>
+        <button class="ghost" id="btnDlTxt" style="display:none">导出 .txt</button>
+      </span>
+    </div>
+    <div class="scrollbox"><table><tbody id="rows"></tbody></table></div>
+  </div>
+  <div id="linkWrap" style="display:none;margin-top:12px">
+    <div class="small" style="margin-bottom:6px">直链（有时效，过期重新解析）：</div>
+    <div class="linkbox" id="linkUrl"></div>
+    <div class="kv" id="linkHeaders" style="display:none"></div>
+    <div class="hint" id="linkNote"></div>
+    <div class="row" style="margin-top:9px">
+      <button class="ghost" id="btnCopyLink">复制直链</button>
+      <button class="ghost" id="btnCopyFull">复制「链接+请求头」</button>
+      <button class="ghost" id="btnAria">复制 aria2 命令</button>
+    </div>
+    <div id="batchLinks" style="margin-top:10px"></div>
+  </div>
+</section>
+
+<section class="card" id="cCred">
+  <h2>② 我的凭证 <span class="badge ok">只存本机浏览器</span></h2>
+  <div class="small">凭证只保存在你这台设备的浏览器里，每次解析随请求发给本站函数调用官方接口，用完不落盘、不进服务器存储。哪家填哪家，不填的盘解析时会提示你。失效时重新粘一次即可；夸克/UC 的 Cookie 轮换会自动回写更新。</div>
+  <div class="credgrid" id="credGrid" style="margin-top:10px"></div>
+  <div class="row" style="margin-top:10px">
+    <button class="ghost" id="btnSaveCred">保存凭证</button>
+    <button class="ghost" id="btnClearCred">清空全部</button>
+  </div>
+  <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+    <div style="font-size:14px;margin-bottom:6px">扫码登录 <span class="badge ok">免找 Cookie</span></div>
+    <div class="small">不用电脑、不用挖 Cookie：用对应 App 扫码即可。登录凭证只回你这台浏览器、自动填进上面的表格（保险箱解锁时还会自动同步）。扫完记得马上在 App 里点「确认登录」。123 点下面的扫码登录（推荐，与 123 官网登录页同款通道，微信或 123 App 扫均可）；迅雷点扫码登录（与迅雷官网登录页同款通道，用手机迅雷 App 扫）。</div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" data-qrlogin="baidu">百度扫码登录</button>
+      <button class="ghost" data-qrlogin="aliyun">阿里扫码登录</button>
+      <button class="ghost" data-qrlogin="quark">夸克扫码登录</button>
+      <button class="ghost" data-qrlogin="uc">UC 扫码登录</button>
+      <button class="ghost" data-qrlogin="cmcc">移动扫码登录</button>
+      <button class="ghost" data-qrlogin="ctyun">天翼扫码登录</button>
+      <button class="ghost" data-qrlogin="guangya">光鸭扫码登录</button>
+      <button class="ghost" data-qrlogin="pan123">123 扫码登录</button>
+      <button class="ghost" data-qrlogin="xunlei">迅雷扫码登录</button>
+    </div>
+    <div id="qrLoginBox" style="display:none;margin-top:10px">
+      <div style="display:flex;justify-content:center"><canvas id="qrLoginCanvas" width="228" height="228" style="background:#fff;border-radius:10px"></canvas><img id="qrLoginImg" alt="登录二维码" width="228" height="228" style="display:none;background:#fff;border-radius:10px"></div>
+      <div class="small" id="qrLoginMsg" style="text-align:center;margin-top:6px"></div>
+      <div class="row" style="justify-content:center;margin-top:6px"><button class="ghost" id="btnQrLoginCancel">取消</button></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="small">小飞机没有扫码，用账号密码登录（其官方接口支持，且无验证码）：密码只发给小飞机官方接口换令牌，<b>本站不保存密码</b>，只保存换到的令牌。</div>
+      <div class="row" style="margin-top:6px">
+        <div class="f1"><input type="text" id="fjUser" placeholder="小飞机账号（手机号/邮箱/用户名）" autocomplete="username"></div>
+        <div class="f1"><input type="password" id="fjPass" placeholder="小飞机密码" autocomplete="current-password"></div>
+        <button class="ghost" id="btnFjLogin">小飞机登录</button>
+      </div>
+      <div class="small" id="fjLoginMsg"></div>
+    </div>
+  </div>
+  <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+    <div style="font-size:14px;margin-bottom:6px">站长保险箱 <span class="badge" id="ownerState">检查中…</span></div>
+    <div class="small">站长专用：把凭证存进本站的云存储（你自己的 Cloudflare 账号）一次，以后在任何设备上输一次口令就免填解析，用的还是你自己的账号。口令由你自己在这里设置（不经过聊天、不经过任何人），服务器只存口令的哈希；保险箱里的凭证只有带对口令的请求才能调用。夸克若已扫码绑定，连填都不用填。提醒：口令别与别处密码相同；怀疑泄露时在设置窗口期重置口令（重置会清空保险箱，需重新存）。</div>
+    <div id="ownerNoPass" style="display:none;margin-top:8px">
+      <div class="small" id="ownerSetupHint">还没设口令。设置窗口平时是关的（防陌生人抢设），需要时告诉助理「开一下保险箱设置窗口」，30 分钟内回到这里设置。</div>
+      <div class="row" id="ownerSetRow" style="display:none;margin-top:6px">
+        <div class="f1"><input type="password" id="inNewPass" placeholder="设置站长口令（至少 6 位）"></div>
+        <button class="ghost" id="btnSetPass">设置口令</button>
+      </div>
+    </div>
+    <div id="ownerHasPass" style="display:none;margin-top:8px">
+      <div class="row">
+        <div class="f1"><input type="password" id="inOwnerPass" placeholder="输入站长口令，解锁本设备免填"></div>
+        <button class="ghost" id="btnUnlock">解锁</button>
+        <button class="ghost" id="btnLock" style="display:none">锁定</button>
+      </div>
+      <div class="small" id="ownerVaultInfo" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="ghost" id="btnVaultSave">把上面填好的凭证存进保险箱</button>
+        <button class="ghost" id="btnChangePass">改口令</button>
+      </div>
+      <div class="row" id="ownerChangeRow" style="display:none;margin-top:6px">
+        <div class="f1"><input type="password" id="inChangePass" placeholder="新口令（至少 6 位）"></div>
+        <button class="ghost" id="btnDoChangePass">确认改口令</button>
+      </div>
+      <div class="small" id="ownerMsg" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="ghost" id="btnShowRecoveryReset">忘口令？用恢复码重置</button>
+        <button class="ghost" id="btnRegenRecovery">重新生成恢复码</button>
+      </div>
+      <div id="ownerRecoveryReset" style="display:none;margin-top:6px">
+        <div class="row">
+          <div class="f1"><input type="text" id="inRecovery" placeholder="输入恢复码"></div>
+          <div class="f1"><input type="password" id="inRecoveryPass" placeholder="新口令（至少 6 位）"></div>
+          <button class="ghost" id="btnDoRecoveryReset">重置口令</button>
+        </div>
+        <div class="small" style="margin-top:4px">重置后保险箱会清空（防泄露连带），凭证要重新存一次；同时会签发一串新恢复码。</div>
+      </div>
+    </div>
+    <div id="ownerRecoveryBox" style="display:none;margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:10px">
+      <div class="small">⚠️ 你的恢复码（只显示这一次）：</div>
+      <div class="row" style="margin-top:6px"><code id="ownerRecoveryCode" style="font-size:16px;letter-spacing:1px"></code><button class="ghost" id="btnCopyRecovery">复制</button></div>
+      <div class="small" style="margin-top:4px">请存进手机备忘录或密码本。忘口令时用它重置；谁拿到它谁就能重置，别给任何人。</div>
+    </div>
+  </div>
+  <details>
+    <summary>凭证从哪拿？（点开看每家的方法）</summary>
+    <div class="small" style="margin-top:6px;white-space:pre-wrap">百度 BDUSS：电脑浏览器登录 pan.baidu.com → F12 → 应用/Application → Cookie → 找 BDUSS 复制。
+阿里 Authorization：登录 alipan.com → F12 → 网络/Network → 随便点一个 api 请求 → 请求头里的 Authorization（Bearer 开头那串）。
+夸克/UC Cookie：登录 pan.quark.cn / drive.uc.cn → F12 → 网络 → 任一请求 → 请求头 Cookie 整段复制。夸克认准 __puus 在里面。
+123 Authorization：令牌就存在 123 网页版的浏览器存储里（键名 authorToken），按设备取：① 电脑：登录 yun.123pan.cn → F12 → 网络 → 任一请求 → 请求头 Authorization。② 安卓（用 Chrome）：登录 yun.123pan.cn，把这段代码存成书签（先收藏本页、再编辑书签把网址整段换成它）：javascript:prompt('整段复制到解析站的 123 Authorization',localStorage.getItem('authorToken')||'没取到') —— 回到 123 页面，在地址栏输入书签名、点带星标的那条，弹窗里就是令牌。③ 苹果（用 Safari）：新建「快捷指令」→ 加操作「在网页上运行 JavaScript」，代码填 var result = localStorage.getItem('authorToken') || '没取到'; completion(result); → 加「拷贝到剪贴板」→ 详细信息打开「在共享表单中显示」、输入类型只勾「Safari 浏览器网页」→ 设置 → 快捷指令 → 高级打开「允许运行脚本」→ 回 Safari 的 123 页面，分享 → 点这条快捷指令 → 允许，令牌即已复制。注意：个别 iOS 版本上快捷指令点了可能毫无反应（系统差异，2026-11 真机实测遇到过），那样就借台电脑用 ①。取到后整段粘到本站 123 那一格即可（不用加 Bearer，本站自动补）。
+天翼 Cookie：登录 cloud.189.cn → F12 → Cookie 整段。
+移动 Authorization / 小飞机 token / 迅雷 Authorization：各自网页版登录后在网络请求头里找 Authorization。</div>
+  </details>
+  <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+    <div style="font-size:14px;margin-bottom:6px">夸克巡检绑定（站长设施）<span class="badge" id="qrState">检查中…</span></div>
+    <div class="small">和上面解析用的「夸克扫码登录」不是一回事：那个是把你自己的夸克凭证填进凭证表、给你自己解析用；这个是给本站「真解析自检」绑定的——用夸克 App 扫一次码，登录 Cookie 存进本站的 KV（不在仓库里、也不进上面的凭证表），巡检每天拿它真解析一个固定测试分享，哪天夸克口径变了能第一时间发现并修。它平时只用于巡检；你在上方保险箱输对口令后，也会用于你本人的夸克解析（免填 Cookie）。失效了重新扫一次即可。</div>
+    <div class="row" style="margin-top:8px"><button class="ghost" id="btnQr">生成巡检绑定二维码</button></div>
+    <div id="qrBox" style="display:none;margin-top:10px">
+      <canvas id="qrCanvas" width="228" height="228" style="background:#fff;border-radius:10px"></canvas>
+      <div class="small" id="qrHint" style="margin-top:6px">用夸克 App 扫一扫…</div>
+    </div>
+  </div>
+</section>
+
+<section class="card" id="cHealth">
+  <h2>③ 接口自检</h2>
+  <div class="small">检查各家官网接口从本站服务器能不能通（不查你的凭证）。某家解析坏了先点这里看一眼：接口还通多半是口径变了，回来反馈即可修。</div>
+  <div class="row" style="margin-top:8px"><button class="ghost" id="btnHealth">开始自检</button><span class="small" id="healthAt"></span></div>
+  <div class="health" id="healthGrid" style="margin-top:10px"></div>
+</section>
+
+<section class="card" id="cVideo">
+  <h2>④ 视频解析 <span class="badge">去水印 · 免登录</span></h2>
+  <div class="drives" id="vDrives"></div>
+  <div class="row" style="margin-top:10px">
+    <div class="f1"><input type="text" id="inVUrl" placeholder="粘贴短视频分享链接（整段分享文案也行）：抖音 / 快手 / 微博 / 小红书 / AcFun / B站 / TikTok / 即梦"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="btn" id="btnVideo">解析</button>
+    <span class="small" id="vRoute"></span>
+  </div>
+  <div class="msg" id="videoMsg"></div>
+  <div id="vResult" style="display:none;margin-top:10px">
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      <img id="vCover" alt="" style="width:92px;height:124px;object-fit:cover;border-radius:10px;display:none;background:var(--card2)">
+      <div style="flex:1;min-width:0">
+        <div id="vTitle" style="font-weight:600;word-break:break-all"></div>
+        <div class="small" id="vMeta"></div>
+        <div class="hint" id="vNote" style="display:none"></div>
+      </div>
+    </div>
+    <div id="vQualities" style="margin-top:10px;display:grid;gap:6px"></div>
+    <div id="vImages" style="margin-top:10px"></div>
+    <div id="vEmbed" style="margin-top:10px;display:none"></div>
+  </div>
+  <div class="hint">视频解析只回直链、不中转流量；多数平台免登录。B站未登录清晰度到 720p（双流）/480p（单文件），AcFun 是 m3u8 流，TikTok 与即梦为实验，YouTube 服务器端拿不到直链（平台机器人墙），会如实说明并给官方播放地址。</div>
+</section>
+
+<section class="card" id="cNote">
+  <h2>本站怎么运作</h2>
+  <ol class="howto">
+    <li><b>只产直链</b>：本站函数替你向各网盘官方接口问出真实下载地址，文件流量走你和网盘之间，不经过本站——所以不吃 Cloudflare 免费额度，也符合它的使用条款。</li>
+    <li><b>只用你自己的凭证</b>：没有公共账号池（那种池子烧号、连坐封 IP、三天两头全灭）。速度和额度取决于你自己账号是不是会员。</li>
+    <li><b>多路线互备</b>：123 有双接口路线、蓝奏有多个官方域名同码互备、夸克/UC 双网关——一条路线挂了会自动换另一条，解析结果旁会标明走了哪条。</li>
+    <li><b>部分直链要带请求头</b>：百度要带 UA + 你的 BDUSS，夸克/UC 要带 Cookie，阿里要带 Referer。结果区会给出「链接+请求头」和现成的 aria2 命令，粘进下载器即可；1DM+ 在新建任务里能填请求头。</li>
+    <li><b>实验支持的盘</b>：移动、天翼、小飞机、123、迅雷、光鸭接口变动频繁，已按在维护的开源项目口径实现，但可能需要按报错迭代。</li>
+    <li><b>已知边界</b>：超大文件在夸克/UC 会先转存进你自己网盘再取链（会占你空间，可事后删）；百度风控最重，日解析量过大（社区口径约 200–300GB）会当日限流。</li>
+    <li><b>视频解析</b>：与网盘同一套路——只回直链不中转、多路线互备（快手双主机、TikTok 双路线）、每天巡检。图集回原图，B站双流要自己合并，AcFun 的 m3u8 用下载器保存。</li>
+    <li><b>自动巡检</b>：仓库带看门狗，每天自动检查各家接口、能机械修的自己修（域名/路线级），其余异常在仓库 Issues 留痕；部署者还可以扫码绑定夸克巡检凭证，做真解析级自检。详见仓库 MAINTENANCE.md。</li>
+  </ol>
+</section>
+
+<footer class="small" style="text-align:center;margin-top:16px">YM Pan · 自建自用 · 解析口径跟随在维护的开源项目（JxPan / LinkSwift / baiduwp 等）</footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* qrcode-generator (MIT) © Kazuhiko Arase — 二维码生成（扫码登录用） */
+/**
+ * Minified by jsDelivr using Terser v5.37.0.
+ * Original file: /npm/qrcode-generator@1.4.4/qrcode.js
+ *
+ * Do NOT use SRI with dynamically generated files! More information: https://www.jsdelivr.com/using-sri-with-dynamic-files
+ */
+var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],f={},c=function(t,r){o=function(t){for(var r=new Array(t),e=0;e<t;e+=1){r[e]=new Array(t);for(var n=0;n<t;n+=1)r[e][n]=null}return r}(i=4*e+17),l(0,0),l(i-7,0),l(0,i-7),s(),h(),d(t,r),e>=7&&v(t),null==a&&(a=p(e,n,u)),w(a,r)},l=function(t,r){for(var e=-1;e<=7;e+=1)if(!(t+e<=-1||i<=t+e))for(var n=-1;n<=7;n+=1)r+n<=-1||i<=r+n||(o[t+e][r+n]=0<=e&&e<=6&&(0==n||6==n)||0<=n&&n<=6&&(0==e||6==e)||2<=e&&e<=4&&2<=n&&n<=4)},h=function(){for(var t=8;t<i-8;t+=1)null==o[t][6]&&(o[t][6]=t%2==0);for(var r=8;r<i-8;r+=1)null==o[6][r]&&(o[6][r]=r%2==0)},s=function(){for(var t=B.getPatternPosition(e),r=0;r<t.length;r+=1)for(var n=0;n<t.length;n+=1){var i=t[r],a=t[n];if(null==o[i][a])for(var u=-2;u<=2;u+=1)for(var f=-2;f<=2;f+=1)o[i+u][a+f]=-2==u||2==u||-2==f||2==f||0==u&&0==f}},v=function(t){for(var r=B.getBCHTypeNumber(e),n=0;n<18;n+=1){var a=!t&&1==(r>>n&1);o[Math.floor(n/3)][n%3+i-8-3]=a}for(n=0;n<18;n+=1){a=!t&&1==(r>>n&1);o[n%3+i-8-3][Math.floor(n/3)]=a}},d=function(t,r){for(var e=n<<3|r,a=B.getBCHTypeInfo(e),u=0;u<15;u+=1){var f=!t&&1==(a>>u&1);u<6?o[u][8]=f:u<8?o[u+1][8]=f:o[i-15+u][8]=f}for(u=0;u<15;u+=1){f=!t&&1==(a>>u&1);u<8?o[8][i-u-1]=f:u<9?o[8][15-u-1+1]=f:o[8][15-u-1]=f}o[i-8][8]=!t},w=function(t,r){for(var e=-1,n=i-1,a=7,u=0,f=B.getMaskFunction(r),c=i-1;c>0;c-=2)for(6==c&&(c-=1);;){for(var g=0;g<2;g+=1)if(null==o[n][c-g]){var l=!1;u<t.length&&(l=1==(t[u]>>>a&1)),f(n,c-g)&&(l=!l),o[n][c-g]=l,-1==(a-=1)&&(u+=1,a=7)}if((n+=e)<0||i<=n){n-=e,e=-e;break}}},p=function(t,r,e){for(var n=A.getRSBlocks(t,r),o=b(),i=0;i<e.length;i+=1){var a=e[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var u=0;for(i=0;i<n.length;i+=1)u+=n[i].dataCount;if(o.getLengthInBits()>8*u)throw"code length overflow. ("+o.getLengthInBits()+">"+8*u+")";for(o.getLengthInBits()+4<=8*u&&o.put(0,4);o.getLengthInBits()%8!=0;)o.putBit(!1);for(;!(o.getLengthInBits()>=8*u||(o.put(236,8),o.getLengthInBits()>=8*u));)o.put(17,8);return function(t,r){for(var e=0,n=0,o=0,i=new Array(r.length),a=new Array(r.length),u=0;u<r.length;u+=1){var f=r[u].dataCount,c=r[u].totalCount-f;n=Math.max(n,f),o=Math.max(o,c),i[u]=new Array(f);for(var g=0;g<i[u].length;g+=1)i[u][g]=255&t.getBuffer()[g+e];e+=f;var l=B.getErrorCorrectPolynomial(c),h=k(i[u],l.getLength()-1).mod(l);for(a[u]=new Array(l.getLength()-1),g=0;g<a[u].length;g+=1){var s=g+h.getLength()-a[u].length;a[u][g]=s>=0?h.getAt(s):0}}var v=0;for(g=0;g<r.length;g+=1)v+=r[g].totalCount;var d=new Array(v),w=0;for(g=0;g<n;g+=1)for(u=0;u<r.length;u+=1)g<i[u].length&&(d[w]=i[u][g],w+=1);for(g=0;g<o;g+=1)for(u=0;u<r.length;u+=1)g<a[u].length&&(d[w]=a[u][g],w+=1);return d}(o,n)};f.addData=function(t,r){var e=null;switch(r=r||"Byte"){case"Numeric":e=M(t);break;case"Alphanumeric":e=x(t);break;case"Byte":e=m(t);break;case"Kanji":e=L(t);break;default:throw"mode:"+r}u.push(e),a=null},f.isDark=function(t,r){if(t<0||i<=t||r<0||i<=r)throw t+","+r;return o[t][r]},f.getModuleCount=function(){return i},f.make=function(){if(e<1){for(var t=1;t<40;t++){for(var r=A.getRSBlocks(t,n),o=b(),i=0;i<u.length;i++){var a=u[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var g=0;for(i=0;i<r.length;i++)g+=r[i].dataCount;if(o.getLengthInBits()<=8*g)break}e=t}c(!1,function(){for(var t=0,r=0,e=0;e<8;e+=1){c(!0,e);var n=B.getLostPoint(f);(0==e||t>n)&&(t=n,r=e)}return r}())},f.createTableTag=function(t,r){t=t||2;var e="";e+='<table style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: "+(r=void 0===r?4*t:r)+"px;",e+='">',e+="<tbody>";for(var n=0;n<f.getModuleCount();n+=1){e+="<tr>";for(var o=0;o<f.getModuleCount();o+=1)e+='<td style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: 0px;",e+=" width: "+t+"px;",e+=" height: "+t+"px;",e+=" background-color: ",e+=f.isDark(n,o)?"#000000":"#ffffff",e+=";",e+='"/>';e+="</tr>"}return e+="</tbody>",e+="</table>"},f.createSvgTag=function(t,r,e,n){var o={};"object"==typeof arguments[0]&&(t=(o=arguments[0]).cellSize,r=o.margin,e=o.alt,n=o.title),t=t||2,r=void 0===r?4*t:r,(e="string"==typeof e?{text:e}:e||{}).text=e.text||null,e.id=e.text?e.id||"qrcode-description":null,(n="string"==typeof n?{text:n}:n||{}).text=n.text||null,n.id=n.text?n.id||"qrcode-title":null;var i,a,u,c,g=f.getModuleCount()*t+2*r,l="";for(c="l"+t+",0 0,"+t+" -"+t+",0 0,-"+t+"z ",l+='<svg version="1.1" xmlns="http://www.w3.org/2000/svg"',l+=o.scalable?"":' width="'+g+'px" height="'+g+'px"',l+=' viewBox="0 0 '+g+" "+g+'" ',l+=' preserveAspectRatio="xMinYMin meet"',l+=n.text||e.text?' role="img" aria-labelledby="'+y([n.id,e.id].join(" ").trim())+'"':"",l+=">",l+=n.text?'<title id="'+y(n.id)+'">'+y(n.text)+"</title>":"",l+=e.text?'<description id="'+y(e.id)+'">'+y(e.text)+"</description>":"",l+='<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>',l+='<path d="',a=0;a<f.getModuleCount();a+=1)for(u=a*t+r,i=0;i<f.getModuleCount();i+=1)f.isDark(a,i)&&(l+="M"+(i*t+r)+","+u+c);return l+='" stroke="transparent" fill="black"/>',l+="</svg>"},f.createDataURL=function(t,r){t=t||2,r=void 0===r?4*t:r;var e=f.getModuleCount()*t+2*r,n=r,o=e-r;return I(e,e,(function(r,e){if(n<=r&&r<o&&n<=e&&e<o){var i=Math.floor((r-n)/t),a=Math.floor((e-n)/t);return f.isDark(a,i)?0:1}return 1}))},f.createImgTag=function(t,r,e){t=t||2,r=void 0===r?4*t:r;var n=f.getModuleCount()*t+2*r,o="";return o+="<img",o+=' src="',o+=f.createDataURL(t,r),o+='"',o+=' width="',o+=n,o+='"',o+=' height="',o+=n,o+='"',e&&(o+=' alt="',o+=y(e),o+='"'),o+="/>"};var y=function(t){for(var r="",e=0;e<t.length;e+=1){var n=t.charAt(e);switch(n){case"<":r+="&lt;";break;case">":r+="&gt;";break;case"&":r+="&amp;";break;case'"':r+="&quot;";break;default:r+=n}}return r};return f.createASCII=function(t,r){if((t=t||1)<2)return function(t){t=void 0===t?2:t;var r,e,n,o,i,a=1*f.getModuleCount()+2*t,u=t,c=a-t,g={"██":"█","█ ":"▀"," █":"▄","  ":" "},l={"██":"▀","█ ":"▀"," █":" ","  ":" "},h="";for(r=0;r<a;r+=2){for(n=Math.floor((r-u)/1),o=Math.floor((r+1-u)/1),e=0;e<a;e+=1)i="█",u<=e&&e<c&&u<=r&&r<c&&f.isDark(n,Math.floor((e-u)/1))&&(i=" "),u<=e&&e<c&&u<=r+1&&r+1<c&&f.isDark(o,Math.floor((e-u)/1))?i+=" ":i+="█",h+=t<1&&r+1>=c?l[i]:g[i];h+="\n"}return a%2&&t>0?h.substring(0,h.length-a-1)+Array(a+1).join("▀"):h.substring(0,h.length-1)}(r);t-=1,r=void 0===r?2*t:r;var e,n,o,i,a=f.getModuleCount()*t+2*r,u=r,c=a-r,g=Array(t+1).join("██"),l=Array(t+1).join("  "),h="",s="";for(e=0;e<a;e+=1){for(o=Math.floor((e-u)/t),s="",n=0;n<a;n+=1)i=1,u<=n&&n<c&&u<=e&&e<c&&f.isDark(o,Math.floor((n-u)/t))&&(i=0),s+=i?g:l;for(o=0;o<t;o+=1)h+=s+"\n"}return h.substring(0,h.length-1)},f.renderTo2dContext=function(t,r){r=r||2;for(var e=f.getModuleCount(),n=0;n<e;n++)for(var o=0;o<e;o++)t.fillStyle=f.isDark(n,o)?"black":"white",t.fillRect(n*r,o*r,r,r)},f};t.stringToBytes=(t.stringToBytesFuncs={default:function(t){for(var r=[],e=0;e<t.length;e+=1){var n=t.charCodeAt(e);r.push(255&n)}return r}}).default,t.createStringToBytes=function(t,r){var e=function(){for(var e=S(t),n=function(){var t=e.read();if(-1==t)throw"eof";return t},o=0,i={};;){var a=e.read();if(-1==a)break;var u=n(),f=n()<<8|n();i[String.fromCharCode(a<<8|u)]=f,o+=1}if(o!=r)throw o+" != "+r;return i}(),n="?".charCodeAt(0);return function(t){for(var r=[],o=0;o<t.length;o+=1){var i=t.charCodeAt(o);if(i<128)r.push(i);else{var a=e[t.charAt(o)];"number"==typeof a?(255&a)==a?r.push(a):(r.push(a>>>8),r.push(255&a)):r.push(n)}}return r}};var r,e,n,o,i,a=1,u=2,f=4,c=8,g={L:1,M:0,Q:3,H:2},l=0,h=1,s=2,v=3,d=4,w=5,p=6,y=7,B=(r=[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],e=1335,n=7973,i=function(t){for(var r=0;0!=t;)r+=1,t>>>=1;return r},(o={}).getBCHTypeInfo=function(t){for(var r=t<<10;i(r)-i(e)>=0;)r^=e<<i(r)-i(e);return 21522^(t<<10|r)},o.getBCHTypeNumber=function(t){for(var r=t<<12;i(r)-i(n)>=0;)r^=n<<i(r)-i(n);return t<<12|r},o.getPatternPosition=function(t){return r[t-1]},o.getMaskFunction=function(t){switch(t){case l:return function(t,r){return(t+r)%2==0};case h:return function(t,r){return t%2==0};case s:return function(t,r){return r%3==0};case v:return function(t,r){return(t+r)%3==0};case d:return function(t,r){return(Math.floor(t/2)+Math.floor(r/3))%2==0};case w:return function(t,r){return t*r%2+t*r%3==0};case p:return function(t,r){return(t*r%2+t*r%3)%2==0};case y:return function(t,r){return(t*r%3+(t+r)%2)%2==0};default:throw"bad maskPattern:"+t}},o.getErrorCorrectPolynomial=function(t){for(var r=k([1],0),e=0;e<t;e+=1)r=r.multiply(k([1,C.gexp(e)],0));return r},o.getLengthInBits=function(t,r){if(1<=r&&r<10)switch(t){case a:return 10;case u:return 9;case f:case c:return 8;default:throw"mode:"+t}else if(r<27)switch(t){case a:return 12;case u:return 11;case f:return 16;case c:return 10;default:throw"mode:"+t}else{if(!(r<41))throw"type:"+r;switch(t){case a:return 14;case u:return 13;case f:return 16;case c:return 12;default:throw"mode:"+t}}},o.getLostPoint=function(t){for(var r=t.getModuleCount(),e=0,n=0;n<r;n+=1)for(var o=0;o<r;o+=1){for(var i=0,a=t.isDark(n,o),u=-1;u<=1;u+=1)if(!(n+u<0||r<=n+u))for(var f=-1;f<=1;f+=1)o+f<0||r<=o+f||0==u&&0==f||a==t.isDark(n+u,o+f)&&(i+=1);i>5&&(e+=3+i-5)}for(n=0;n<r-1;n+=1)for(o=0;o<r-1;o+=1){var c=0;t.isDark(n,o)&&(c+=1),t.isDark(n+1,o)&&(c+=1),t.isDark(n,o+1)&&(c+=1),t.isDark(n+1,o+1)&&(c+=1),0!=c&&4!=c||(e+=3)}for(n=0;n<r;n+=1)for(o=0;o<r-6;o+=1)t.isDark(n,o)&&!t.isDark(n,o+1)&&t.isDark(n,o+2)&&t.isDark(n,o+3)&&t.isDark(n,o+4)&&!t.isDark(n,o+5)&&t.isDark(n,o+6)&&(e+=40);for(o=0;o<r;o+=1)for(n=0;n<r-6;n+=1)t.isDark(n,o)&&!t.isDark(n+1,o)&&t.isDark(n+2,o)&&t.isDark(n+3,o)&&t.isDark(n+4,o)&&!t.isDark(n+5,o)&&t.isDark(n+6,o)&&(e+=40);var g=0;for(o=0;o<r;o+=1)for(n=0;n<r;n+=1)t.isDark(n,o)&&(g+=1);return e+=Math.abs(100*g/r/r-50)/5*10},o),C=function(){for(var t=new Array(256),r=new Array(256),e=0;e<8;e+=1)t[e]=1<<e;for(e=8;e<256;e+=1)t[e]=t[e-4]^t[e-5]^t[e-6]^t[e-8];for(e=0;e<255;e+=1)r[t[e]]=e;var n={glog:function(t){if(t<1)throw"glog("+t+")";return r[t]},gexp:function(r){for(;r<0;)r+=255;for(;r>=256;)r-=255;return t[r]}};return n}();function k(t,r){if(void 0===t.length)throw t.length+"/"+r;var e=function(){for(var e=0;e<t.length&&0==t[e];)e+=1;for(var n=new Array(t.length-e+r),o=0;o<t.length-e;o+=1)n[o]=t[o+e];return n}(),n={getAt:function(t){return e[t]},getLength:function(){return e.length},multiply:function(t){for(var r=new Array(n.getLength()+t.getLength()-1),e=0;e<n.getLength();e+=1)for(var o=0;o<t.getLength();o+=1)r[e+o]^=C.gexp(C.glog(n.getAt(e))+C.glog(t.getAt(o)));return k(r,0)},mod:function(t){if(n.getLength()-t.getLength()<0)return n;for(var r=C.glog(n.getAt(0))-C.glog(t.getAt(0)),e=new Array(n.getLength()),o=0;o<n.getLength();o+=1)e[o]=n.getAt(o);for(o=0;o<t.getLength();o+=1)e[o]^=C.gexp(C.glog(t.getAt(o))+r);return k(e,0).mod(t)}};return n}var A=function(){var t=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12,7,37,13],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],r=function(t,r){var e={};return e.totalCount=t,e.dataCount=r,e},e={};return e.getRSBlocks=function(e,n){var o=function(r,e){switch(e){case g.L:return t[4*(r-1)+0];case g.M:return t[4*(r-1)+1];case g.Q:return t[4*(r-1)+2];case g.H:return t[4*(r-1)+3];default:return}}(e,n);if(void 0===o)throw"bad rs block @ typeNumber:"+e+"/errorCorrectionLevel:"+n;for(var i=o.length/3,a=[],u=0;u<i;u+=1)for(var f=o[3*u+0],c=o[3*u+1],l=o[3*u+2],h=0;h<f;h+=1)a.push(r(c,l));return a},e}(),b=function(){var t=[],r=0,e={getBuffer:function(){return t},getAt:function(r){var e=Math.floor(r/8);return 1==(t[e]>>>7-r%8&1)},put:function(t,r){for(var n=0;n<r;n+=1)e.putBit(1==(t>>>r-n-1&1))},getLengthInBits:function(){return r},putBit:function(e){var n=Math.floor(r/8);t.length<=n&&t.push(0),e&&(t[n]|=128>>>r%8),r+=1}};return e},M=function(t){var r=a,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+2<r.length;)t.put(o(r.substring(n,n+3)),10),n+=3;n<r.length&&(r.length-n==1?t.put(o(r.substring(n,n+1)),4):r.length-n==2&&t.put(o(r.substring(n,n+2)),7))}},o=function(t){for(var r=0,e=0;e<t.length;e+=1)r=10*r+i(t.charAt(e));return r},i=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);throw"illegal char :"+t};return n},x=function(t){var r=u,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+1<r.length;)t.put(45*o(r.charAt(n))+o(r.charAt(n+1)),11),n+=2;n<r.length&&t.put(o(r.charAt(n)),6)}},o=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);if("A"<=t&&t<="Z")return t.charCodeAt(0)-"A".charCodeAt(0)+10;switch(t){case" ":return 36;case"$":return 37;case"%":return 38;case"*":return 39;case"+":return 40;case"-":return 41;case".":return 42;case"/":return 43;case":":return 44;default:throw"illegal char :"+t}};return n},m=function(r){var e=f,n=t.stringToBytes(r),o={getMode:function(){return e},getLength:function(t){return n.length},write:function(t){for(var r=0;r<n.length;r+=1)t.put(n[r],8)}};return o},L=function(r){var e=c,n=t.stringToBytesFuncs.SJIS;if(!n)throw"sjis not supported.";!function(){var t=n("友");if(2!=t.length||38726!=(t[0]<<8|t[1]))throw"sjis not supported."}();var o=n(r),i={getMode:function(){return e},getLength:function(t){return~~(o.length/2)},write:function(t){for(var r=o,e=0;e+1<r.length;){var n=(255&r[e])<<8|255&r[e+1];if(33088<=n&&n<=40956)n-=33088;else{if(!(57408<=n&&n<=60351))throw"illegal char at "+(e+1)+"/"+n;n-=49472}n=192*(n>>>8&255)+(255&n),t.put(n,13),e+=2}if(e<r.length)throw"illegal char at "+(e+1)}};return i},D=function(){var t=[],r={writeByte:function(r){t.push(255&r)},writeShort:function(t){r.writeByte(t),r.writeByte(t>>>8)},writeBytes:function(t,e,n){e=e||0,n=n||t.length;for(var o=0;o<n;o+=1)r.writeByte(t[o+e])},writeString:function(t){for(var e=0;e<t.length;e+=1)r.writeByte(t.charCodeAt(e))},toByteArray:function(){return t},toString:function(){var r="";r+="[";for(var e=0;e<t.length;e+=1)e>0&&(r+=","),r+=t[e];return r+="]"}};return r},S=function(t){var r=t,e=0,n=0,o=0,i={read:function(){for(;o<8;){if(e>=r.length){if(0==o)return-1;throw"unexpected end of file./"+o}var t=r.charAt(e);if(e+=1,"="==t)return o=0,-1;t.match(/^\s$/)||(n=n<<6|a(t.charCodeAt(0)),o+=6)}var i=n>>>o-8&255;return o-=8,i}},a=function(t){if(65<=t&&t<=90)return t-65;if(97<=t&&t<=122)return t-97+26;if(48<=t&&t<=57)return t-48+52;if(43==t)return 62;if(47==t)return 63;throw"c:"+t};return i},I=function(t,r,e){for(var n=function(t,r){var e=t,n=r,o=new Array(t*r),i={setPixel:function(t,r,n){o[r*e+t]=n},write:function(t){t.writeString("GIF87a"),t.writeShort(e),t.writeShort(n),t.writeByte(128),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(255),t.writeByte(255),t.writeByte(255),t.writeString(","),t.writeShort(0),t.writeShort(0),t.writeShort(e),t.writeShort(n),t.writeByte(0);var r=a(2);t.writeByte(2);for(var o=0;r.length-o>255;)t.writeByte(255),t.writeBytes(r,o,255),o+=255;t.writeByte(r.length-o),t.writeBytes(r,o,r.length-o),t.writeByte(0),t.writeString(";")}},a=function(t){for(var r=1<<t,e=1+(1<<t),n=t+1,i=u(),a=0;a<r;a+=1)i.add(String.fromCharCode(a));i.add(String.fromCharCode(r)),i.add(String.fromCharCode(e));var f,c,g,l=D(),h=(f=l,c=0,g=0,{write:function(t,r){if(t>>>r!=0)throw"length over";for(;c+r>=8;)f.writeByte(255&(t<<c|g)),r-=8-c,t>>>=8-c,g=0,c=0;g|=t<<c,c+=r},flush:function(){c>0&&f.writeByte(g)}});h.write(r,n);var s=0,v=String.fromCharCode(o[s]);for(s+=1;s<o.length;){var d=String.fromCharCode(o[s]);s+=1,i.contains(v+d)?v+=d:(h.write(i.indexOf(v),n),i.size()<4095&&(i.size()==1<<n&&(n+=1),i.add(v+d)),v=d)}return h.write(i.indexOf(v),n),h.write(e,n),h.flush(),l.toByteArray()},u=function(){var t={},r=0,e={add:function(n){if(e.contains(n))throw"dup key:"+n;t[n]=r,r+=1},size:function(){return r},indexOf:function(r){return t[r]},contains:function(r){return void 0!==t[r]}};return e};return i}(t,r),o=0;o<r;o+=1)for(var i=0;i<t;i+=1)n.setPixel(i,o,e(i,o));var a=D();n.write(a);for(var u=function(){var t=0,r=0,e=0,n="",o={},i=function(t){n+=String.fromCharCode(a(63&t))},a=function(t){if(t<0);else{if(t<26)return 65+t;if(t<52)return t-26+97;if(t<62)return t-52+48;if(62==t)return 43;if(63==t)return 47}throw"n:"+t};return o.writeByte=function(n){for(t=t<<8|255&n,r+=8,e+=1;r>=6;)i(t>>>r-6),r-=6},o.flush=function(){if(r>0&&(i(t<<6-r),t=0,r=0),e%3!=0)for(var o=3-e%3,a=0;a<o;a+=1)n+="="},o.toString=function(){return n},o}(),f=a.toByteArray(),c=0;c<f.length;c+=1)u.writeByte(f[c]);return u.flush(),"data:image/gif;base64,"+u};return t}();qrcode.stringToBytesFuncs["UTF-8"]=function(t){return function(t){for(var r=[],e=0;e<t.length;e++){var n=t.charCodeAt(e);n<128?r.push(n):n<2048?r.push(192|n>>6,128|63&n):n<55296||n>=57344?r.push(224|n>>12,128|n>>6&63,128|63&n):(e++,n=65536+((1023&n)<<10|1023&t.charCodeAt(e)),r.push(240|n>>18,128|n>>12&63,128|n>>6&63,128|63&n))}return r}(t)},function(t){"function"==typeof define&&define.amd?define([],t):"object"==typeof exports&&(module.exports=t())}((function(){return qrcode}));
+//# sourceMappingURL=/sm/26b4b0d0b1e283d6b3ec9857ac597d7a60c76ac17be1ef4c965f03086de426bb.map
+</script>
+<script>
+const DRIVES = [
+  { id:'baidu', name:'百度', tier:1, re:/pan\.baidu\.com/ },
+  { id:'aliyun', name:'阿里', tier:1, re:/(aliyundrive|alipan)\.com/ },
+  { id:'quark', name:'夸克', tier:1, re:/pan\.quark\.cn/ },
+  { id:'uc', name:'UC', tier:1, re:/drive\.uc\.cn|fast\.uc\.cn/ },
+  { id:'lanzou', name:'蓝奏', tier:1, re:/lanzou|ilanzou/ },
+  { id:'cmcc', name:'移动云盘', tier:2, re:/yun\.139\.com/ },
+  { id:'ctyun', name:'天翼', tier:2, re:/cloud\.189\.cn/ },
+  { id:'feijipan', name:'小飞机', tier:2, re:/feijipan\.com/ },
+  { id:'pan123', name:'123', tier:2, re:/123pan\.(com|cn)|123684\.com|123865\.com|123912\.com/ },
+  { id:'xunlei', name:'迅雷', tier:2, re:/pan\.xunlei\.com/ },
+  { id:'guangya', name:'光鸭', tier:2, re:/guangyapan\.com/ },
+];
+const CREDS = [
+  { drive:'baidu', key:'bduss', label:'百度 BDUSS', ph:'粘贴 BDUSS 值' },
+  { drive:'baidu', key:'stoken', label:'百度 STOKEN（可空）', ph:'一般不用填' },
+  { drive:'aliyun', key:'aliAuth', label:'阿里 Authorization（取链必填，列目录可免；扫码登录自动填）', ph:'Bearer …' },
+  { drive:'aliyun', key:'aliRefresh', label:'阿里刷新令牌（扫码登录自动存，解析时自动换新令牌）', ph:'扫码后自动填，一般不用手动动' },
+  { drive:'guangya', key:'gyToken', label:'光鸭访问令牌（扫码登录自动填）', ph:'扫码后自动填' },
+  { drive:'guangya', key:'gyRefresh', label:'光鸭刷新令牌（扫码登录自动存）', ph:'扫码后自动填' },
+  { drive:'quark', key:'quarkCookie', label:'夸克 Cookie（整段）', ph:'含 __puus 的整段 Cookie' },
+  { drive:'uc', key:'ucCookie', label:'UC Cookie（整段）', ph:'整段 Cookie' },
+  { drive:'cmcc', key:'cmccAuth', label:'移动 Authorization（可空）', ph:'网页版请求头里的 Authorization' },
+  { drive:'ctyun', key:'ctCookie', label:'天翼 Cookie（取链多半需要）', ph:'整段 Cookie' },
+  { drive:'feijipan', key:'fjToken', label:'小飞机 token（可空）', ph:'登录后的 token' },
+  { drive:'pan123', key:'p123Token', label:'123 Authorization（取链需要）', ph:'Bearer … 或 JWT' },
+  { drive:'xunlei', key:'xlAuth', label:'迅雷 Authorization（可空）', ph:'Bearer …' },
+  { drive:'xunlei', key:'xlRefresh', label:'迅雷刷新令牌（扫码登录自动存，解析时自动换新令牌）', ph:'扫码后自动填，一般不用手动动' },
+];
+const $ = s => document.querySelector(s);
+const state = { drive:'baidu', ctx:null, files:[], stack:[], lastLink:null, batch:[] };
+let toastTimer;
+function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),2400); }
+function msg(kind, text){ const el=$('#parseMsg'); el.className='msg '+(kind||''); el.textContent=text||''; if(!text) el.style.display='none'; }
+function fmtSize(n){ if(!n) return '—'; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return n.toFixed(n>=100?0:n>=10?1:2)+' '+u[i]; }
+function credKey(k){ return 'ympan_cred_'+k; }
+function loadCreds(){ const o={}; for(const c of CREDS){ const v=localStorage.getItem(credKey(c.key)); if(v) o[c.key]=v; } return o; }
+function saveCredField(k,v){ if(v) localStorage.setItem(credKey(k), v); else localStorage.removeItem(credKey(k)); }
+
+/* drive chips */
+const dw=$('#drives');
+for(const d of DRIVES){
+  const b=document.createElement('button'); b.className='dchip'+(d.id===state.drive?' on':''); b.dataset.id=d.id;
+  b.innerHTML=d.name+(d.tier===2?'<span class="t2">实验</span>':d.tier===0?'<span class="t0">筹备中</span>':'');
+  b.onclick=()=>{ state.drive=d.id; document.querySelectorAll('.dchip').forEach(x=>x.classList.toggle('on',x.dataset.id===d.id)); };
+  dw.appendChild(b);
+}
+function detectDrive(text){ for(const d of DRIVES){ if(d.re.test(text)) return d.id; } return null; }
+
+/* cred form */
+const cg=$('#credGrid');
+for(const c of CREDS){
+  const div=document.createElement('div');
+  div.innerHTML=`<label>${c.label} <span id="vh_${c.key}" style="color:var(--ok,#2a9d5c)"></span></label>`;
+  const inp=document.createElement('input'); inp.type='text'; inp.id='cred_'+c.key; inp.placeholder=c.ph; inp.autocomplete='off';
+  inp.value=localStorage.getItem(credKey(c.key))||'';
+  div.appendChild(inp); cg.appendChild(div);
+}
+$('#btnSaveCred').onclick=async ()=>{
+  for(const c of CREDS){ saveCredField(c.key, $('#cred_'+c.key).value.trim()); }
+  if(localStorage.getItem('ympan_owner_pass')){
+    const n = await vaultSaveAll(true);
+    toast(n > 0 ? `凭证已保存，并同步到保险箱（${n} 家）` : '凭证已保存在本机浏览器');
+    refreshOwner();
+  } else {
+    toast('凭证已保存在本机浏览器');
+  }
+};
+$('#btnClearCred').onclick=()=>{ for(const c of CREDS){ localStorage.removeItem(credKey(c.key)); $('#cred_'+c.key).value=''; } toast('已清空'); };
+
+function extractFromText(t){
+  const urlM = t.match(/https?:\/\/[^\s，。；、）)】]+/);
+  const url = urlM ? urlM[0] : t.trim();
+  let pwd='';
+  const pm = t.match(/(?:提取码|访问码|密码|pwd|code)[：:\s]*([A-Za-z0-9]{4,8})/i) || url.match(/[?&](?:pwd|code|passcode)=([A-Za-z0-9]+)/i);
+  if(pm) pwd=pm[1];
+  return { url, pwd };
+}
+
+async function api(payload){
+  const headers = {'Content-Type':'application/json'};
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(op) headers['x-owner-pass'] = op;
+  const r = await fetch('/api/parse', { method:'POST', headers, body: JSON.stringify(payload) });
+  return r.json();
+}
+async function ownerApi(payload){
+  const r = await fetch('/api/owner', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  return r.json();
+}
+
+function applyCredUpdate(drive, upd){
+  if(!upd) return;
+  if(upd.fields){
+    for(const [k, v] of Object.entries(upd.fields)){
+      saveCredField(k, v);
+      const inp = $('#cred_' + k); if(inp) inp.value = v;
+      const op = localStorage.getItem('ympan_owner_pass');
+      if(op) ownerApi({ action:'vault', pass:op, drive, cred:{ [k]: v } }).catch(()=>{});
+    }
+    toast('登录令牌已自动续期');
+  }
+  if(upd.cookie && (drive==='quark'||drive==='uc')){
+    const key = drive==='quark' ? 'quarkCookie' : 'ucCookie';
+    saveCredField(key, upd.cookie);
+    const inp=$('#cred_'+key); if(inp) inp.value=upd.cookie;
+    toast('Cookie 已自动更新（__puus 轮换）');
+    const op = localStorage.getItem('ympan_owner_pass');
+    if(op) ownerApi({ action:'vault', pass:op, drive, cred:{ [key]: upd.cookie } }).catch(()=>{});
+  }
+}
+
+function showLink(res){
+  state.lastLink=res; state.batch=[];
+  $('#linkUrl').textContent=res.url||'';
+  const h=res.headers||{};
+  const lines=Object.entries(h).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`);
+  const kv=$('#linkHeaders');
+  if(lines.length){ kv.style.display='block'; kv.textContent='下载时要带上这组请求头：\n'+lines.join('\n'); } else kv.style.display='none';
+  $('#linkNote').textContent=res.note||'';
+  $('#batchLinks').innerHTML='';
+  $('#linkWrap').style.display='block';
+  $('#btnCopyAll').style.display='none'; $('#btnDlTxt').style.display='none';
+}
+function fullText(res){
+  const h=res.headers||{};
+  let t=res.url;
+  const lines=Object.entries(h).filter(([,v])=>v);
+  if(lines.length){ t+='\n'+lines.map(([k,v])=>`${k}: ${v}`).join('\n'); }
+  return t;
+}
+function ariaCmd(res){
+  const h=res.headers||{}; let c=`aria2c -x 16 -s 16 --check-certificate=false`;
+  if(h['User-Agent']) c+=` --user-agent="${h['User-Agent']}"`;
+  if(h['Cookie']) c+=` --header="Cookie: ${h['Cookie']}"`;
+  if(h['Referer']) c+=` --referer="${h['Referer']}"`;
+  c+=` "${res.url}"`;
+  return c;
+}
+async function copyText(t, tip){ try{ await navigator.clipboard.writeText(t); toast(tip||'已复制'); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(tip||'已复制'); } }
+$('#btnCopyLink').onclick=()=> state.lastLink && copyText(state.lastLink.url,'直链已复制');
+$('#btnCopyFull').onclick=()=> state.lastLink && copyText(fullText(state.lastLink),'已复制（链接+请求头）');
+$('#btnAria').onclick=()=> state.lastLink && copyText(ariaCmd(state.lastLink),'aria2 命令已复制');
+
+function renderList(res){
+  state.ctx=res.ctx; state.files=res.files||[];
+  $('#crumb').textContent=`共 ${state.files.length} 项`+(res.route?` · 路线：${res.route}`:'')+(res.truncated?' · 已达单页上限，可能未显示全（该盘接口一次最多返回 100 条）':'');
+  $('#routeInfo').textContent=res.route?('解析路线：'+res.route):'';
+  const tb=$('#rows'); tb.innerHTML='';
+  for(const f of state.files){
+    const tr=document.createElement('tr');
+    const cb = f.dir?'':`<input type="checkbox" class="pick" data-id="${CSS.escape(String(f.id))}">`;
+    tr.innerHTML=`<td style="width:26px">${cb}</td><td class="fname">${f.dir?'📁 ':'📄 '}${f.name.replace(/</g,'&lt;')}</td><td class="fsize">${f.dir?'':fmtSize(f.size)}</td><td style="width:74px;text-align:right"></td>`;
+    const cell=tr.lastElementChild;
+    const btn=document.createElement('button'); btn.className='ghost'; btn.textContent=f.dir?'打开':'取链';
+    btn.onclick=()=> f.dir ? openFolder(f) : getLink(f);
+    cell.appendChild(btn);
+    tb.appendChild(tr);
+  }
+  $('#listWrap').style.display='block';
+  $('#btnBack').style.display=state.stack.length?'':'none';
+}
+async function openFolder(f){
+  state.stack.push({ ctx: state.ctx, files: state.files });
+  msg('', ''); 
+  const newCtx = { ...state.ctx, dir: state.ctx && state.ctx.drive==='aliyun' ? f.id : f.id };
+  if(state.drive==='baidu') newCtx.dir=f.path;
+  if(state.drive==='pan123') newCtx.dir=String(f.id);
+  try{
+    const res=await api({ drive:state.drive, action:'list', url:$('#inUrl').value.trim(), pwd:$('#inPwd').value.trim(), cred:loadCreds(), ctx:newCtx });
+    if(!res.ok){ state.stack.pop(); msg('err', res.error||'打开文件夹失败'); return; }
+    applyCredUpdate(state.drive, res.credUpdate);
+    renderList(res);
+  }catch(e){ state.stack.pop(); msg('err','网络错误：'+e.message); }
+}
+$('#btnBack').onclick=()=>{
+  const prev=state.stack.pop(); if(!prev) return;
+  renderList({ ctx:prev.ctx, files:prev.files });
+};
+async function getLink(f){
+  msg('','');
+  try{
+    const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:state.ctx, file:f });
+    if(!res.ok){ msg('err', res.error||'取链失败'); return; }
+    applyCredUpdate(state.drive, res.credUpdate);
+    if(res.route) $('#routeInfo').textContent='取链路线：'+res.route;
+    showLink(res);
+  }catch(e){ msg('err','网络错误：'+e.message); }
+}
+$('#btnBatch').onclick=async()=>{
+  const picks=[...document.querySelectorAll('.pick:checked')].map(x=>x.dataset.id);
+  if(!picks.length){ toast('先勾选文件'); return; }
+  const files=state.files.filter(f=>picks.includes(String(f.id)));
+  state.batch=[];
+  const box=$('#batchLinks'); box.innerHTML='<div class="small">批量取链中…</div>';
+  let html='';
+  for(const f of files){
+    try{
+      const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:state.ctx, file:f });
+      if(res.ok){ state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>${res.url}</div>`; }
+      else html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>失败：${(res.error||'').replace(/</g,'&lt;')}</div>`;
+    }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>失败：${e.message}</div>`; }
+    box.innerHTML=html;
+  }
+  $('#linkWrap').style.display='block';
+  if(state.batch.length){ $('#btnCopyAll').style.display=''; $('#btnDlTxt').style.display=''; }
+};
+$('#btnCopyAll').onclick=()=> copyText(state.batch.map(b=>b.url).join('\n'), '全部直链已复制（一行一条）');
+$('#btnDlTxt').onclick=()=>{
+  const content=state.batch.map(b=>{
+    let t=b.url+'\n  out='+ (b.name||'file');
+    const h=b.headers||{};
+    if(h['User-Agent']) t+='\n  user-agent='+h['User-Agent'];
+    if(h['Cookie']) t+='\n  header=Cookie: '+h['Cookie'];
+    if(h['Referer']) t+='\n  referer='+h['Referer'];
+    return t;
+  }).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:'text/plain'})); a.download='ym-pan-links.txt'; a.click();
+  toast('已导出 aria2 格式 .txt');
+};
+
+$('#inUrl').addEventListener('input', e=>{
+  const { pwd } = extractFromText(e.target.value);
+  const d = detectDrive(e.target.value);
+  if(d){ state.drive=d; document.querySelectorAll('.dchip').forEach(x=>x.classList.toggle('on',x.dataset.id===d)); }
+  if(pwd && !$('#inPwd').value) $('#inPwd').value=pwd;
+});
+$('#btnParse').onclick=async()=>{
+  const raw=$('#inUrl').value.trim(); if(!raw){ toast('先粘贴分享链接'); return; }
+  const { url, pwd } = extractFromText(raw);
+  const d = detectDrive(url); if(d) state.drive=d;
+  state.stack=[]; msg('',''); $('#listWrap').style.display='none'; $('#linkWrap').style.display='none';
+  const btn=$('#btnParse'); btn.disabled=true; btn.textContent='解析中…';
+  try{
+    const res=await api({ drive:state.drive, action:'list', url, pwd: $('#inPwd').value.trim()||pwd, cred:loadCreds() });
+    if(!res.ok){ msg('err', res.error||'解析失败'); return; }
+    applyCredUpdate(state.drive, res.credUpdate);
+    if(res.kind==='link'){ showLink(res); msg('okk','解析成功，拿直链去下载器里下吧'); }
+    else renderList(res);
+  }catch(e){ msg('err','网络错误：'+e.message); }
+  finally{ btn.disabled=false; btn.textContent='解析'; }
+};
+
+/* 夸克扫码绑定巡检凭证 */
+let qrTimer=null;
+async function qrStatus(){
+  try{
+    const r=await fetch('/api/qr?action=status'); const d=await r.json();
+    const el=$('#qrState');
+    if(!d.enabled){ el.textContent='未启用'; return; }
+    el.textContent=d.bound?'已绑定':'未绑定';
+    el.className='badge '+(d.bound?'ok':'warn');
+  }catch(e){ $('#qrState').textContent='未知'; }
+}
+qrStatus();
+function drawQr(text, sel){
+  const qr=qrcode(0,'M'); qr.addData(text); qr.make();
+  const n=qr.getModuleCount(), cv=$(sel||'#qrCanvas'), ctx=cv.getContext('2d');
+  const cell=Math.floor(228/(n+2)), off=Math.floor((228-cell*n)/2);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,228,228); ctx.fillStyle='#000';
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++) if(qr.isDark(r,c)) ctx.fillRect(off+c*cell,off+r*cell,cell,cell);
+}
+$('#btnQr').onclick=async()=>{
+  const btn=$('#btnQr');
+  if(qrTimer){ clearInterval(qrTimer); qrTimer=null; btn.disabled=false; btn.textContent='重新生成二维码'; $('#qrHint').textContent='已停止等待，点生成可重新开始'; return; }
+  btn.textContent='停止等待';
+  const deadline=Date.now()+12*60*1000;
+  const cycle=async()=>{
+    try{
+      const r=await fetch('/api/qr'); const d=await r.json();
+      if(!d.ok){ $('#qrHint').textContent='❌ '+(d.error||'生成失败'); btn.disabled=false; btn.textContent='生成二维码'; return; }
+      $('#qrBox').style.display='block'; drawQr(d.qr);
+      let left=170;
+      $('#qrHint').textContent='用夸克 App 扫这张码，扫完马上在夸克里点「确认登录」（还剩 '+left+' 秒，过期会自动换新码）';
+      clearInterval(qrTimer);
+      qrTimer=setInterval(async()=>{
+        left-=2.5;
+        if(Date.now()>deadline){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='等太久先停了，准备好后重新点生成，扫完立刻确认'; btn.textContent='重新生成二维码'; return; }
+        if(left<0){ clearInterval(qrTimer); $('#qrHint').textContent='上一张过期了，正在自动换新码…'; cycle(); return; }
+        try{
+          const pr=await fetch('/api/qr?action=poll'); const pd=await pr.json();
+          if(pd.state==='done'){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='✅ 绑定成功，巡检凭证已保存'; toast('巡检凭证绑定成功'); qrStatus(); btn.textContent='重新生成二维码'; }
+          else if(pd.state==='scanned'){ $('#qrHint').textContent='已扫码！现在就在夸克 App 里点「确认登录」，别切走'; }
+          else if(pd.state==='expired'){ clearInterval(qrTimer); $('#qrHint').textContent='上一张过期了，正在自动换新码，用新码再扫一次…'; cycle(); }
+          else if(pd.state==='error'){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='❌ '+(pd.error||'绑定失败'); btn.textContent='重新生成二维码'; }
+          else { const h=$('#qrHint'); if(!/已扫码/.test(h.textContent)) h.textContent='用夸克 App 扫这张码，扫完马上点「确认登录」（还剩 '+Math.ceil(left)+' 秒，过期自动换新码）'; }
+        }catch(e){}
+      },2500);
+    }catch(e){ $('#qrHint').textContent='网络错误：'+e.message; btn.textContent='重新生成二维码'; }
+  };
+  cycle();
+};
+
+/* ===== 访客扫码登录（百度/阿里/夸克/UC/移动/天翼/光鸭）+ 小飞机账密登录 ===== */
+const QR_NAMES = { baidu:'百度', aliyun:'阿里云盘', quark:'夸克', uc:'UC', cmcc:'移动云盘', ctyun:'天翼云盘', guangya:'光鸭', pan123:'123 云盘', xunlei:'迅雷' };
+const QR_HINTS = { pan123:'用微信或 123 云盘 App 扫这张码都行，在扫码端点确认登录（微信扫需账号绑过微信；码约 1 分钟过期，动作要快）', xunlei:'用手机迅雷 App 扫这张码（App 里点扫一扫），扫完在 App 里点「确认登录」；码只有 2 分钟，过期重新点一次' };
+const QR_SCANNED = { pan123:'已扫码！在扫码端点「确认登录」就行，别切走', xunlei:'已扫码！现在就在迅雷 App 里点「确认登录」，别切走' };
+let qrLoginTimer = null;
+function stopQrLogin(msg){
+  if(qrLoginTimer){ clearTimeout(qrLoginTimer); qrLoginTimer = null; }
+  if(msg) $('#qrLoginMsg').textContent = msg;
+}
+async function fillCredsAndVault(creds){
+  for(const [k, v] of Object.entries(creds || {})){
+    const inp = $('#cred_' + k);
+    if(inp) inp.value = v;
+    saveCredField(k, v);
+  }
+  let extra = '';
+  if(localStorage.getItem('ympan_owner_pass')){
+    const n = await vaultSaveAll(true);
+    if(n > 0) extra = '，并已同步进保险箱';
+    refreshOwner();
+  }
+  return extra;
+}
+async function startQrLogin(drive){
+  stopQrLogin();
+  const name = QR_NAMES[drive] || drive;
+  const box = $('#qrLoginBox'); box.style.display = 'block';
+  $('#qrLoginMsg').textContent = '正在生成二维码…';
+  $('#qrLoginCanvas').style.display = 'none'; $('#qrLoginImg').style.display = 'none';
+  let d;
+  try{
+    const r = await fetch(`/api/qrlogin?drive=${drive}&action=start`);
+    d = await r.json();
+  }catch(e){ $('#qrLoginMsg').textContent = '❌ 网络错误：' + e.message; return; }
+  if(!d.ok){ $('#qrLoginMsg').textContent = '❌ ' + (d.error || '生成失败'); return; }
+  if(d.qrImg){ const img = $('#qrLoginImg'); img.src = d.qrImg; img.style.display = 'block'; }
+  else { $('#qrLoginCanvas').style.display = 'block'; drawQr(d.qr, '#qrLoginCanvas'); }
+  const deadline = Date.now() + 4 * 60 * 1000;
+  $('#qrLoginMsg').textContent = QR_HINTS[drive] || `用${name} App 扫这张码，扫完马上在 App 里点「确认登录」`;
+  const poll = async () => {
+    if(Date.now() > deadline){ stopQrLogin('二维码等太久已停下，准备好后重新点扫码登录'); return; }
+    try{
+      const r = await fetch('/api/qrlogin', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ drive, action:'poll', params: d.params || {} }) });
+      const pd = await r.json();
+      if(!pd.ok && pd.error){ stopQrLogin('❌ ' + pd.error); return; }
+      if(pd.state === 'done'){
+        stopQrLogin();
+        const extra = await fillCredsAndVault(pd.creds);
+        $('#qrLoginMsg').textContent = `✅ ${name}登录成功，凭证已保存${extra}`;
+        toast(`${name}登录成功`);
+        box.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if(pd.state === 'expired'){ stopQrLogin('二维码已过期，重新点一次扫码登录即可'); return; }
+      if(pd.state === 'scanned') $('#qrLoginMsg').textContent = QR_SCANNED[drive] || '已扫码！现在就在 App 里点「确认登录」，别切走';
+    }catch(e){ /* 单次轮询失败不中断，继续等 */ }
+    qrLoginTimer = setTimeout(poll, drive === 'baidu' ? 500 : 2500);
+  };
+  qrLoginTimer = setTimeout(poll, 800);
+}
+for(const b of document.querySelectorAll('[data-qrlogin]')){
+  b.onclick = () => startQrLogin(b.dataset.qrlogin);
+}
+$('#btnQrLoginCancel').onclick = () => { stopQrLogin(); $('#qrLoginBox').style.display = 'none'; };
+$('#btnFjLogin').onclick = async () => {
+  const username = $('#fjUser').value.trim(), password = $('#fjPass').value;
+  const m = $('#fjLoginMsg');
+  if(!username || !password){ m.textContent = '❌ 先填小飞机的账号和密码'; return; }
+  m.textContent = '正在登录小飞机…';
+  try{
+    const r = await fetch('/api/qrlogin', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ drive:'feijipan', action:'login', username, password }) });
+    const d = await r.json();
+    if(!d.ok || d.state !== 'done'){ m.textContent = '❌ ' + (d.error || '登录失败'); return; }
+    $('#fjPass').value = '';
+    const extra = await fillCredsAndVault(d.creds);
+    m.textContent = `✅ 小飞机登录成功，令牌已保存${extra}（密码没有保存）`;
+    toast('小飞机登录成功');
+  }catch(e){ m.textContent = '❌ 网络错误：' + e.message; }
+};
+
+/* ===== 站长保险箱 ===== */
+const DRIVE_NAME = Object.fromEntries(DRIVES.map(d=>[d.id,d.name]));
+async function refreshOwner(){
+  try{
+    const r = await fetch('/api/owner?action=status'); const d = await r.json();
+    if(!d.ok) { $('#ownerState').textContent='不可用'; return; }
+    const unlocked = !!localStorage.getItem('ympan_owner_pass');
+    $('#ownerState').textContent = d.hasPass ? (unlocked ? '已解锁' : '已设口令') : '未设口令';
+    $('#ownerState').className = 'badge' + (unlocked ? ' ok' : '');
+    $('#ownerNoPass').style.display = d.hasPass ? 'none' : 'block';
+    $('#ownerHasPass').style.display = d.hasPass ? 'block' : 'none';
+    if(!d.hasPass){
+      $('#ownerSetRow').style.display = d.setupOpen ? 'flex' : 'none';
+      if(d.setupOpen) $('#ownerSetupHint').textContent = '设置窗口已开启（30 分钟内有效），现在就设你的口令：';
+    } else {
+      $('#btnUnlock').style.display = unlocked ? 'none' : '';
+      $('#btnLock').style.display = unlocked ? '' : 'none';
+      $('#inOwnerPass').style.display = unlocked ? 'none' : '';
+      const names = d.vaulted.map(v=>DRIVE_NAME[v]||v);
+      let info = '保险箱里已存：' + (names.length ? names.join('、') : '（暂无）');
+      if(d.quarkBound && !d.vaulted.includes('quark')) info += '；夸克已扫码绑定，自动可用';
+      if(d.vaulted.length){
+        info += '　清除：' + d.vaulted.map(v=>`<a href="javascript:void(0)" data-unvault="${v}">${DRIVE_NAME[v]||v}</a>`).join(' ');
+      }
+      $('#ownerVaultInfo').innerHTML = info;
+      markVaultStates(d.vaulted);
+      document.querySelectorAll('[data-unvault]').forEach(a=>{ a.onclick = async ()=>{
+        const op = localStorage.getItem('ympan_owner_pass');
+        if(!op) return toast('先解锁再清除');
+        await ownerApi({ action:'unvault', pass:op, drive:a.dataset.unvault });
+        toast('已清除'); refreshOwner();
+      };});
+    }
+  }catch(e){ $('#ownerState').textContent='检查失败'; }
+}
+function showRecovery(code){
+  if(!code) return;
+  $('#ownerRecoveryCode').textContent = code;
+  $('#ownerRecoveryBox').style.display = 'block';
+}
+$('#btnCopyRecovery').onclick = ()=>{ navigator.clipboard?.writeText($('#ownerRecoveryCode').textContent); toast('恢复码已复制'); };
+$('#btnSetPass').onclick = async ()=>{
+  const p = $('#inNewPass').value.trim();
+  if(p.length < 6) return toast('口令至少 6 位');
+  const d = await ownerApi({ action:'setpass', pass:p });
+  if(!d.ok) return toast(d.error || '设置失败');
+  localStorage.setItem('ympan_owner_pass', p);
+  toast(d.reset ? '口令已重置，保险箱已清空，请重新存凭证' : '口令已设置，本设备已解锁');
+  showRecovery(d.recovery);
+  refreshOwner();
+};
+$('#btnShowRecoveryReset').onclick = ()=>{ const r=$('#ownerRecoveryReset'); r.style.display = r.style.display==='none' ? 'block' : 'none'; };
+$('#btnDoRecoveryReset').onclick = async ()=>{
+  const rec = $('#inRecovery').value.trim();
+  const np = $('#inRecoveryPass').value.trim();
+  if(!rec) return toast('先输入恢复码');
+  if(np.length < 6) return toast('新口令至少 6 位');
+  const d = await ownerApi({ action:'setpass', pass:np, recovery:rec });
+  if(!d.ok) return toast(d.error || '重置失败');
+  localStorage.setItem('ympan_owner_pass', np);
+  toast('口令已重置，保险箱已清空，请重新存凭证');
+  showRecovery(d.recovery);
+  refreshOwner();
+};
+$('#btnRegenRecovery').onclick = async ()=>{
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(!op) return toast('先解锁再重新生成');
+  const d = await ownerApi({ action:'regen-recovery', pass:op });
+  if(!d.ok) return toast(d.error || '生成失败');
+  showRecovery(d.recovery);
+  toast('新恢复码已生成，旧的作废');
+};
+$('#btnUnlock').onclick = async ()=>{
+  const p = $('#inOwnerPass').value.trim();
+  if(!p) return toast('先输入口令');
+  const d = await ownerApi({ action:'verify', pass:p });
+  if(!d.ok) return toast('口令不正确');
+  localStorage.setItem('ympan_owner_pass', p);
+  toast('已解锁，本设备解析自动免填');
+  refreshOwner();
+};
+$('#btnLock').onclick = ()=>{ localStorage.removeItem('ympan_owner_pass'); toast('已锁定'); refreshOwner(); };
+async function vaultSaveAll(silent){
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(!op){ if(!silent) toast('先解锁再存'); return 0; }
+  const byDrive = {};
+  for(const c of CREDS){
+    const v = ($('#cred_'+c.key)?.value || '').trim();
+    if(v) (byDrive[c.drive] = byDrive[c.drive] || {})[c.key] = v;
+  }
+  const drives = Object.keys(byDrive);
+  if(!drives.length){ if(!silent) toast('上面凭证表里没有已填的凭证，先填再存'); return 0; }
+  let okN = 0;
+  for(const dv of drives){
+    const d = await ownerApi({ action:'vault', pass:op, drive:dv, cred:byDrive[dv] });
+    if(d.ok) okN++;
+  }
+  return okN;
+}
+function markVaultStates(vaulted){
+  const set = new Set(vaulted || []);
+  for(const c of CREDS){
+    const el = $('#vh_'+c.key);
+    if(el) el.textContent = set.has(c.drive) ? '· 保险箱已同步 ✓' : '';
+  }
+}
+$('#btnVaultSave').onclick = async ()=>{
+  const okN = await vaultSaveAll(false);
+  if(okN > 0){ $('#ownerMsg').textContent = `已存进保险箱 ${okN} 家。`; refreshOwner(); }
+};
+$('#btnChangePass').onclick = ()=>{ const r=$('#ownerChangeRow'); r.style.display = r.style.display==='none' ? 'flex' : 'none'; };
+$('#btnDoChangePass').onclick = async ()=>{
+  const op = localStorage.getItem('ympan_owner_pass');
+  if(!op) return toast('先解锁');
+  const np = $('#inChangePass').value.trim();
+  if(np.length < 6) return toast('新口令至少 6 位');
+  const d = await ownerApi({ action:'changepass', pass:op, newPass:np });
+  if(!d.ok) return toast(d.error || '改口令失败');
+  localStorage.setItem('ympan_owner_pass', np);
+  toast('口令已更新'); refreshOwner();
+};
+refreshOwner();
+
+$('#btnHealth').onclick=async()=>{
+  $('#healthGrid').innerHTML='<div class="small">自检中…</div>';
+  try{
+    const r=await fetch('/api/parse?action=health'); const d=await r.json();
+    $('#healthAt').textContent=d.at?(' 时间：'+new Date(d.at).toLocaleString('zh-CN')):'';
+    $('#healthGrid').innerHTML=(d.health||[]).map(h=>`<div>${h.reachable?'🟢':'🔴'} ${h.name}<br><span class="small">HTTP ${h.status||'无响应'}</span></div>`).join('');
+  }catch(e){ $('#healthGrid').innerHTML='<div class="small">自检失败：'+e.message+'</div>'; }
+};
+
+/* video section */
+const VPLATFORMS=[['抖音',''],['快手',''],['微博',''],['小红书',''],['AcFun',''],['B站',''],['TikTok','实验'],['即梦','实验'],['YouTube','不支持直链']];
+const vw=$('#vDrives');
+for(const [n,t] of VPLATFORMS){
+  const b=document.createElement('span'); b.className='dchip'; b.style.cursor='default';
+  b.innerHTML=n+(t?`<span class="t2">${t}</span>`:'');
+  vw.appendChild(b);
+}
+function vmsg(kind, text){ const el=$('#videoMsg'); el.className='msg '+(kind||''); el.textContent=text||''; if(!text) el.style.display='none'; }
+$('#btnVideo').onclick=async()=>{
+  const text=$('#inVUrl').value.trim();
+  if(!text){ vmsg('err','先粘贴分享链接或整段分享文案'); return; }
+  const btn=$('#btnVideo'); btn.disabled=true; vmsg('', '解析中…'); $('#vResult').style.display='none'; $('#vRoute').textContent='';
+  try{
+    const r=await fetch('/api/video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const d=await r.json();
+    if(!d.ok){
+      vmsg('err', d.error||'解析失败');
+      if(d.embed){ $('#vResult').style.display='block'; $('#vCover').style.display='none'; $('#vTitle').textContent='YouTube'; $('#vMeta').textContent=''; $('#vQualities').innerHTML=''; $('#vImages').innerHTML=''; const em=$('#vEmbed'); em.style.display='block'; em.innerHTML=`<a href="${d.watch}" target="_blank" rel="noopener">▶ 在 YouTube 打开</a>`; }
+      return;
+    }
+    vmsg('ok', `✅ ${d.platformName||''} 解析成功`);
+    $('#vRoute').textContent=d.route?('路线：'+d.route):'';
+    $('#vResult').style.display='block';
+    const cov=$('#vCover');
+    if(d.cover){ cov.src=d.cover; cov.style.display='block'; } else cov.style.display='none';
+    $('#vTitle').textContent=d.title||'(无标题)';
+    $('#vMeta').textContent=[d.author?('作者：'+d.author):'', d.type==='image'?'类型：图文':d.type==='hls'?'类型：m3u8 流':'类型：视频'].filter(Boolean).join(' · ');
+    const vn=$('#vNote');
+    if(d.note){ vn.textContent=d.note; vn.style.display='block'; } else vn.style.display='none';
+    const q=$('#vQualities'); q.innerHTML='';
+    for(const it of (d.qualities||[])){
+      const row=document.createElement('div'); row.className='linkbox'; row.style.display='flex'; row.style.gap='8px'; row.style.alignItems='center';
+      const lab=document.createElement('span'); lab.className='badge'; lab.textContent=it.label; row.appendChild(lab);
+      const a=document.createElement('a'); a.href=it.url; a.target='_blank'; a.rel='noopener'; a.textContent='打开直链'; a.style.whiteSpace='nowrap'; row.appendChild(a);
+      const c=document.createElement('button'); c.className='ghost'; c.textContent='复制'; c.onclick=()=>copyText(it.url,'已复制直链'); row.appendChild(c);
+      if(d.needReferer){ const c2=document.createElement('button'); c2.className='ghost'; c2.textContent='复制「链接+请求头」'; c2.onclick=()=>copyText(it.url+'\nReferer: '+d.needReferer,'已复制（含 Referer）'); row.appendChild(c2); }
+      const u=document.createElement('span'); u.className='small'; u.style.wordBreak='break-all'; u.textContent=it.url; row.appendChild(u);
+      q.appendChild(row);
+    }
+    const im=$('#vImages'); im.innerHTML='';
+    if(d.images && d.images.length){
+      const grid=document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='repeat(auto-fill,minmax(96px,1fr))'; grid.style.gap='6px';
+      d.images.forEach((u,ix)=>{ const a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener'; const img=document.createElement('img'); img.src=u; img.alt='图 '+(ix+1); img.style.width='100%'; img.style.height='96px'; img.style.objectFit='cover'; img.style.borderRadius='8px'; a.appendChild(img); grid.appendChild(a); });
+      im.appendChild(grid);
+      const cp=document.createElement('button'); cp.className='ghost'; cp.style.marginTop='8px'; cp.textContent='复制全部原图链接'; cp.onclick=()=>copyText(d.images.join('\n'),'已复制全部原图链接'); im.appendChild(cp);
+    }
+    $('#vEmbed').style.display='none';
+  }catch(e){ vmsg('err','网络错误：'+e.message); }
+  btn.disabled=false;
+};
+$('#inVUrl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#btnVideo').click(); });
+</script>
+</body>
+</html>
