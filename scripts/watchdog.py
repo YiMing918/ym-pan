@@ -76,10 +76,10 @@ def probe_structure():
         ('lanzou', {'drive': 'lanzou', 'action': 'list', 'url': 'https://www.lanzoui.com/iAbCdEf', 'cred': {}}, None),
         ('aliyun', {'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/abcdef', 'cred': {}}, ['获取分享令牌失败', '没认出阿里云盘分享链接']),
         ('uc', {'drive': 'uc', 'action': 'list', 'url': 'https://drive.uc.cn/s/abcdef', 'cred': {}}, ['Cookie']),
-        ('cmcc', {'drive': 'cmcc', 'action': 'list', 'url': 'https://yun.139.com/shareweb/#/w/i/abcdef', 'cred': {}}, ['列目录失败', '没认出移动云盘分享']),
-        ('ctyun', {'drive': 'ctyun', 'action': 'list', 'url': 'https://cloud.189.cn/t/abcdef', 'cred': {}}, ['列目录失败', '没认出天翼分享链接']),
+        ('cmcc', {'drive': 'cmcc', 'action': 'list', 'url': 'https://yun.139.com/shareweb/#/w/i/abcdef', 'cred': {}}, ['列目录失败', '没认出移动云盘分享', '移动云盘分享不存在或已取消']),
+        ('ctyun', {'drive': 'ctyun', 'action': 'list', 'url': 'https://cloud.189.cn/t/abcdef', 'cred': {}}, ['列目录失败', '没认出天翼分享链接', '天翼分享不存在或已取消']),
         ('feijipan', {'drive': 'feijipan', 'action': 'list', 'url': 'https://share.feijipan.com/s/abcdef', 'cred': {}}, ['列目录失败', '没认出小飞机']),
-        ('xunlei', {'drive': 'xunlei', 'action': 'list', 'url': 'https://pan.xunlei.com/s/abcdef', 'cred': {}}, ['验证码令牌', '没认出迅雷分享链接']),
+        ('xunlei', {'drive': 'xunlei', 'action': 'list', 'url': 'https://pan.xunlei.com/s/abcdef', 'cred': {}}, ['验证码令牌', '没认出迅雷分享链接', '迅雷列目录失败']),
     ]
     for name, payload, expects in cases:
         st, txt = http(BASE + '/api/parse', method='POST', data=payload, timeout=60)
@@ -191,8 +191,10 @@ def probe_usability():
             if s2 not in (200, 206) or 'text/html' in ct2:
                 problems.append(f'直链可用性 {name}：链已签发但拉字节失败 HTTP {s2} {ct2}（链不可用，检查是否缺 Referer 等请求头标注）')
     # 阿里：匿名 token→列目录链（取直链需访客自己的 Authorization，自动监测到列表层为止）
+    # 样本 2026-11-11 换新：旧样本 KsbSSdhkSvN 已被分享者取消（ShareLink.Forbidden）；新样本为
+    # MediaGo 官方下载分享（https://www.alipan.com/s/SwCbQBN2nZQ，无提取码，顶层 MediaGo 文件夹）。
     st, txt = http(BASE + '/api/parse', method='POST',
-                   data={'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/KsbSSdhkSvN', 'cred': {}}, timeout=60)
+                   data={'drive': 'aliyun', 'action': 'list', 'url': 'https://www.alipan.com/s/SwCbQBN2nZQ', 'cred': {}}, timeout=60)
     try:
         d = json.loads(txt)
         if not d.get('ok') or not d.get('files'):
