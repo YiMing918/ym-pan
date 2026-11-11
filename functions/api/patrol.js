@@ -135,9 +135,11 @@ async function quarkPatrol(kv, url, pwd) {
       } catch { /* ignore */ }
     }
     // 拿到直链后再验一步：带会话 Cookie 真拉一小段字节，确认链能下而不只是被签发
+    // 探针请求头须与正式取链/给下载器的请求头一致：夸克按 UA 档位限流，通用浏览器 UA 会被
+    // 下载域名 412（2026-11-11 巡检：取链正常、route=guest，但探针连得 522/412）。
     let linkProbe = 'error';
     try {
-      const pr = await fetch(link, { headers: { Range: 'bytes=0-1023', Cookie: jar.str(), 'User-Agent': UA } });
+      const pr = await fetch(link, { headers: { Range: 'bytes=0-1023', Cookie: jar.str(), 'User-Agent': DL_UA, Referer: 'https://pan.quark.cn/' } });
       linkProbe = String(pr.status);
       if ([403, 404, 410].includes(pr.status)) {
         return { ok: false, stage: 'linkprobe', error: `直链已签发但拉字节被拒（HTTP ${pr.status}），链不可用` };
