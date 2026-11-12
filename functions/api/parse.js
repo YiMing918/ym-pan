@@ -35,7 +35,7 @@ function json(data, status = 200) {
   });
 }
 const ok = (extra) => json({ ok: true, ...extra });
-const fail = (error, extra) => json({ ok: false, error, ...extra });
+const fail = (error, extra) => typeof extra === 'number' ? json({ ok: false, error }, extra) : json({ ok: false, error, ...extra });
 
 class Jar {
   constructor(init = '') {
@@ -254,20 +254,10 @@ function quarkFamily(host, pr, label) {
   const base = `https://${host}/1/clouddrive`;
   // __dt/__t 必须每次请求新鲜生成：老实现模块加载时算一次终身复用，属可疑暗病（2026-11-10 对照现行实现修正）
   const qNow = () => `pr=${pr}&fr=pc&uc_param_str=&__dt=${600 + Math.floor(Math.random() * 9000)}&__t=${Date.now()}`;
-  const q = qNow();
   function cookieOf(cred, env) {
     const c = (cred.cookie || env.CRED_COOKIE || '').trim();
     if (!c) throw new Error(`未填${label} Cookie：请在「凭证」里粘贴你自己${label}账号的整段 Cookie（只存你浏览器）`);
     return c;
-  }
-  async function call(path, { method = 'GET', body, cred, env, jar } = {}) {
-    const j = jar || new Jar(cookieOf(cred, env));
-    const r = await reqJson(`${base}${path}?${qNow()}`, {
-      method, jar: j,
-      headers: { 'Content-Type': 'application/json', Referer: `https://${host.split('/')[0]}/`, Origin: `https://${host.split('/')[0]}` },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    return { r, jar: j };
   }
   return {
     id(url) {

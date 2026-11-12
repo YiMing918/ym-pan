@@ -23,7 +23,7 @@ youtube: { name: 'YouTube', tier: 0},
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
 status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'},
 });
-const fail = (error, extra = {}) => json({ ok: false, error,...extra});
+const fail = (error, extra = {}) => typeof extra === 'number' ? json({ ok: false, error }, extra) : json({ ok: false, error, ...extra });
 
 async function fetchText(url, { ua = UA_DESKTOP, headers = {}, method = 'GET', body, redirect = 'follow', timeout = 25000} = {}) {
 const ctl = new AbortController();
@@ -610,6 +610,7 @@ async function parseBilibili(rawUrl) {
       const as = [...(pd.dash.audio || [])].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
       if (as.length) qs.push({ label: '音频轨（与视频轨一起下载）', url: as[0].baseUrl || as[0].base_url });
     }
+    if (!qs.length) throw new Error('B 站接口被拦截（兜底也没拿到播放地址），稍后再试');
     const tm = page.text.match(/<meta property="og:title" content="([^"]+)"/) || page.text.match(/<title>([^<]+?) - 哔哩哔哩/);
     const im = page.text.match(/<meta property="og:image" content="([^"]+)"/);
     return { platform: 'bilibili', type: 'video', title: tm ? tm[1] : '', author: '', cover: im ? im[1] : '', url: qs[0].url, qualities: qs, needReferer: 'https://www.bilibili.com/', route: '视频页 __playinfo__（接口被拦兜底）', note: 'B 站直链下载时必须带 Referer（已在下方「链接+请求头」里配好）；未登录最高约 480p/720p 双流，1080p 需要登录，本站不收你的 B 站账号。' };
@@ -807,7 +808,7 @@ export async function onRequest(context) {
   if (request.method === 'GET') {
     return json({ ok: true, service: 'ym-pan video api', platforms: Object.fromEntries(Object.entries(PLATFORMS).map(([k, v]) => [k, { name: v.name, tier: v.tier }])) });
   }
-  if (request.method !== 'POST') return fail('只支持 POST', {});
+  if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body = {};
   try { body = await request.json(); } catch { return fail('请求体不是 JSON'); }
   return handleVideo(body);

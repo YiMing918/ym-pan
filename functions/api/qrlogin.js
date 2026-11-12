@@ -650,8 +650,9 @@ const xunlei = {
     const r = await fetchT(`${XL_HOST}/v1/auth/device/code`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA, Origin: 'https://pan.xunlei.com', Referer: 'https://pan.xunlei.com/' }, body: JSON.stringify({ client_id: XL_WEB_CLIENT }) });
     const j = await r.json().catch(() => null);
     if (!j || !j.device_code) throw new Error('迅雷发码失败：' + (j ? (j.error_description || j.error || JSON.stringify(j).slice(0, 100)) : '无响应'));
-    const qr = 'https://xluser-ssl.xunlei.com/xluser.core.login/v3/qrlogin?redirect_uri=' + encodeURIComponent(j.verification_uri_complete || j.short_uri_complete);
-    if (!qr) throw new Error('迅雷发码失败：官方没给扫码地址');
+    const vc = j.verification_uri_complete || j.short_uri_complete;
+    if (!vc) throw new Error('迅雷发码失败：官方没给扫码地址');
+    const qr = 'https://xluser-ssl.xunlei.com/xluser.core.login/v3/qrlogin?redirect_uri=' + encodeURIComponent(vc);
     return { drive: 'xunlei', qr, params: { deviceCode: j.device_code } };
   },
   async poll(p) {
