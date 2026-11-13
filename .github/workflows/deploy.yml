@@ -3,6 +3,7 @@ name: deploy
 # 推送到 main 或手动触发时，把站点部署到 Cloudflare Pages。
 # 需在仓库 Settings → Secrets 添加 CLOUDFLARE_API_TOKEN 与 CLOUDFLARE_ACCOUNT_ID；
 # 没配令牌时部署步自动跳过（Fork 用户可改用 Pages 连 Git 的方式部署，不受影响）。
+# v1.9.2 起：部署前先跑冒烟测试（tests/smoke.mjs），不过不许部署。
 on:
   push:
     branches: [main]
@@ -17,6 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 冒烟测试（不过不许部署）
+        run: node tests/smoke.mjs
       - name: 推送部署到 Cloudflare Pages（仅当配了部署令牌）
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
         run: |
