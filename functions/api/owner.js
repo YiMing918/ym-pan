@@ -16,7 +16,7 @@ const VAULT_KEYS = {
   ctyun: ['ctCookie'],
   feijipan: ['fjToken'],
   pan123: ['p123Token'],
-  xunlei: ['xlAuth', 'xlRefresh'],
+  xunlei: ['xlAuth', 'xlRefresh', 'xlCaptchaSign', 'xlCaptchaTs', 'xlUserId', 'xlDeviceId'],
   guangya: ['gyToken', 'gyRefresh'],
 };
 
@@ -135,14 +135,29 @@ export async function onRequest(context) {
   }
 
   if (action === 'setpass') {
-    // 三条授权路径，互为兜底、都不依赖任何人常驻：① 30 分钟设置窗口（巡检口令开启）
-    // ② 从未设过口令（首次认领，含在 Cloudflare 后台删键后的终极重置）③ 有效的恢复码
+    // 授权路径：① 30 分钟设置窗口（巡检口令开启）② 有效的恢复码
+    // ③ 从未设过口令（首次认领，含在 Cloudflare 后台删键后的终极重置）——
+    // v1.9.2 起加门：部署配了 PATROL_KEY 时，首次认领必须带对 x-patrol-key
+    // （与 open-setup 同一把钥匙，部署者/助理侧持有），陌生人再也不能抢先认领；
+    // 未配 PATROL_KEY 的零配置部署无钥匙可验，维持先到先得（属部署选择，文档已注明）。
+    // 另外 setpass 与其它验口令动作共用同一套失败限流（此前 setpass 分支无限流，
+    // 恢复码可被无限试）。
+    const rl0 = await rlCheck(kv, request);
+    if (rl0.locked) return fail('尝试过于频繁，请 15 分钟后再试', 429);
     const had = !!(await kv.get('owner_hash'));
     const recHash = await kv.get('owner_recovery_hash');
     const recOk = !!(body.recovery && recHash && (await timingEq(await sha256hex(String(body.recovery).replace(/[\s-]/g, '').toUpperCase()), recHash)));
-    if (!(await setupOpen(kv)) && had && !recOk) {
+    const winOpen = await setupOpen(kv);
+    let firstClaimOk = true;
+    if (!had && !recOk && !winOpen && env.PATROL_KEY) {
+      firstClaimOk = await timingEq(request.headers.get('x-patrol-key') || '', env.PATROL_KEY);
+    }
+    if (!winOpen && !recOk && (!firstClaimOk || had)) {
+      await rlFail(kv, request, rl0.ip);
+      if (!had && !firstClaimOk) return fail('首次认领需要巡检口令（请求头 x-patrol-key），防止陌生人抢设。部署者可用巡检口令认领，或先开启设置窗口。');
       return fail('设置窗口未开启，且恢复码不正确。可用恢复码重置，或让助理开启 30 分钟设置窗口。');
     }
+    await rlClear(kv, rl0.ip);
     const p = String(body.pass || '');
     if (p.length < 6) return fail('口令至少 6 位');
     await kv.put('owner_hash', await hashPassV2(p));
@@ -154,6 +169,12 @@ export async function onRequest(context) {
     const recovery = genRecovery();
     await kv.put('owner_recovery_hash', await sha256hex(recovery.replace(/-/g, '')));
     return json({ ok: true, reset: had, recovery });
+  }
+
+  // 未知动作在验口令之前就拒：此前任何垃圾 action 也会触发整套口令校验
+  // （含限流 KV 读写），等于给探测者白送校验预言机 + 白烧 KV 写配额。
+  if (!['verify', 'regen-recovery', 'changepass', 'vault', 'unvault'].includes(action)) {
+    return fail('未知动作');
   }
 
   // 以下动作都要验口令（带失败限流；验过后把旧哈希无感升级为加盐格式）
@@ -184,12 +205,22 @@ export async function onRequest(context) {
     const drive = String(body.drive || '');
     const keys = VAULT_KEYS[drive];
     if (!keys) return fail('这家不支持存保险箱');
-    const cred = {};
+    const inc = {};
     for (const k of keys) {
       const v = body.cred && body.cred[k];
-      if (typeof v === 'string' && v.trim()) cred[k] = v.trim();
+      if (typeof v === 'string' && v.trim()) inc[k] = v.trim();
     }
-    if (!Object.keys(cred).length) return fail('没有可存的凭证（先填好再存）');
+    if (!Object.keys(inc).length) return fail('没有可存的凭证（先填好再存）');
+    // 合并写入（v1.9.2）：先读旧值再覆盖本次带来的字段，未带的老字段保留。
+    // 此前是整份覆盖——前端逐字段分开发时，阿里/迅雷/光鸭一次续期回两个字段，
+    // 第二次单键写入会把第一个字段静默冲掉。现在单键写也只更新那一个键。
+    let old = {};
+    try { old = JSON.parse((await kv.get('vault_' + drive)) || '{}') || {}; } catch { old = {}; }
+    const cred = {};
+    for (const k of keys) {
+      if (typeof old[k] === 'string' && old[k]) cred[k] = old[k];
+    }
+    Object.assign(cred, inc);
     await kv.put('vault_' + drive, JSON.stringify(cred));
     return json({ ok: true });
   }

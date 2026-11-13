@@ -131,11 +131,17 @@ const bd = {
     meta.jar = jar.str();
     return meta;
   },
-  async list(url, pwd, cred, env, ctx) {
+  async list(url, pwd, cred, env, ctx, credSrc) {
     let meta = ctx && ctx.shareid ? ctx : null;
     let dir = (ctx && ctx.dir) || '/';
     if (!meta) { meta = await bd.open(url, pwd, cred, env); dir = '/'; }
     const jar = new Jar(meta.jar);
+    // S2 配套（同 download）：复用已剥离 BDUSS 的 ctx 翻子目录时，服务端按本次
+    // 解析到的凭证把 BDUSS 补回工作罐（不下发），保证翻页/进子目录行为不变。
+    if (!jar.get('BDUSS')) {
+      const b = String((cred && cred.bduss) || '').trim();
+      if (b) jar.map.set('BDUSS', b);
+    }
     const api = `https://pan.baidu.com/share/list?app_id=250528&channel=chunlei&clienttype=0&web=1`
       + `&uk=${meta.uk}&shareid=${meta.shareid}&order=other&desc=1&showempty=0&page=1&num=100`
       + `&dir=${encodeURIComponent(dir)}&sekey=${encodeURIComponent(meta.randsk)}`;
@@ -145,11 +151,23 @@ const bd = {
       id: String(f.fs_id), name: f.server_filename, size: f.size || 0,
       dir: f.isdir === 1 || f.isdir === '1', path: f.path,
     }));
-    return { ctx: { ...meta, dir }, files, path: dir };
+    // S2：env 来源的 BDUSS 不进下发 ctx 的会话罐（否则任何访客列一次目录就把站长
+    // BDUSS 永久带走）；download 时由服务端按本次解析的凭证重新注入，不影响取链。
+    let jarOut = meta.jar;
+    if (credSrc && credSrc.bduss === 'env' && meta.jar) {
+      const j = new Jar(meta.jar); j.map.delete('BDUSS'); jarOut = j.str();
+    }
+    return { ctx: { ...meta, jar: jarOut, dir }, files, path: dir };
   },
   async download(cred, env, ctx, file) {
     if (!ctx || !ctx.shareid) throw new Error('会话已过期，请重新解析一次');
     const jar = new Jar(ctx.jar);
+    // S2 配套：list 下发的 ctx 已剥掉 env 来源 BDUSS，这里按本次服务端解析到的
+    // 凭证重新注入会话罐（只在服务端用，不下发），取链行为与剥离前完全一致。
+    if (!jar.get('BDUSS')) {
+      const b = String((cred && cred.bduss) || '').trim();
+      if (b) jar.map.set('BDUSS', b);
+    }
     const r = await reqJson(`https://pan.baidu.com/api/sharedownload?app_id=250528&channel=chunlei&clienttype=12&web=1&sign=${ctx.sign}&timestamp=${ctx.timestamp}`, {
       method: 'POST', jar,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: 'https://pan.baidu.com/' },
@@ -1279,7 +1297,7 @@ const gy = {
 const ADAPTERS = {
   baidu: {
     credKeys: ['bduss', 'stoken'],
-    list: (b, env) => bd.list(b.url, b.pwd, b.cred, env, b.ctx),
+    list: (b, env) => bd.list(b.url, b.pwd, b.cred, env, b.ctx, b.credSrc),
     download: (b, env) => bd.download(b.cred, env, b.ctx, b.file),
   },
   aliyun: {
@@ -1377,7 +1395,7 @@ export async function onRequest(context) {
   if (request.method === 'GET') {
     const u = new URL(request.url);
     if (u.searchParams.get('action') === 'health') return health(env);
-    return ok({ service: 'ym-pan parse api', version: '1.0', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.2', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
@@ -1390,6 +1408,12 @@ export async function onRequest(context) {
     if (typeof v === 'string' && v.trim()) reqCred[k] = v;
   }
   body.cred = { ...envCreds(env), ...reqCred };
+  // 凭证来源标注（S2）：'req' 请求自带 / 'env' 环境变量 / 'vault' 保险箱（口令门后填充）。
+  // 响应回吐（credUpdate、百度 ctx 里的会话罐）按来源过滤：env 来源的凭证是站长存的，
+  // 匿名访客也在用它解析——把它的原文/轮换值写进响应等于把凭证发给所有人。
+  body.credSrc = {};
+  for (const [k, v] of Object.entries(envCreds(env))) if (v) body.credSrc[k] = 'env';
+  for (const k of Object.keys(reqCred)) body.credSrc[k] = 'req';
   // 站长保险箱兜底：请求带正确站长口令（x-owner-pass）时，用保险箱存的凭证补齐本次没带的；
   // 夸克未单独存保险箱时，再兜底用扫码绑定的巡检 Cookie。保险箱异常绝不影响正常解析。
   // 验口令与 owner.js 同口径限流（共用 rl:owner:<ip> 计数键，两条路径合计 15 分钟内
@@ -1450,7 +1474,7 @@ export async function onRequest(context) {
             if (c) vc = { quarkCookie: c };
           }
           if (vc) for (const [k, v] of Object.entries(vc)) {
-            if (typeof v === 'string' && v && !body.cred[k]) body.cred[k] = v;
+            if (typeof v === 'string' && v && !body.cred[k]) { body.cred[k] = v; body.credSrc[k] = 'vault'; }
           }
         } else {
           try {
@@ -1465,13 +1489,30 @@ export async function onRequest(context) {
       }
     }
   } catch { /* 保险箱兜底失败就当没存过 */ }
+  // S2 中央闸：credUpdate 若源于 env 凭证（站长存的、匿名访客共用），整包扣下不回吐——
+  // 轮换后的 Cookie/令牌写进响应等于把新凭证发给任何访客。'req'（访客自己的）与
+  // 'vault'（站长口令门后，只有站长能触发、前端靠它回存保险箱）维持原样回吐。
+  const scrubEnvCredUpdate = (res) => {
+    if (!res || !res.credUpdate) return res;
+    const src = body.credSrc || {};
+    const cu = res.credUpdate;
+    let envDerived = false;
+    if (cu.cookie) {
+      const key = drive === 'quark' ? 'quarkCookie' : drive === 'uc' ? 'ucCookie' : null;
+      envDerived = !!key && src[key] === 'env';
+    } else if (cu.fields) {
+      envDerived = Object.keys(cu.fields).some((k) => src[k] === 'env');
+    }
+    if (envDerived) delete res.credUpdate;
+    return res;
+  };
   try {
     if (body.action === 'download') {
       if (!adapter.download) return fail('该盘是单文件直达，没有单独的取链步骤');
-      const res = await adapter.download(body, env);
+      const res = scrubEnvCredUpdate(await adapter.download(body, env));
       return ok({ drive, kind: 'link', ...res });
     }
-    const res = await adapter.list(body, env);
+    const res = scrubEnvCredUpdate(await adapter.list(body, env));
     if (res.single) return ok({ drive, kind: 'link', ...res });
     // 各家列表接口单页上限多为 100：满 100 条时提示可能未显示全（不保证恰好 100 条时没有更多，宁可多提示）
     if (res && Array.isArray(res.files) && res.files.length >= 100) res.truncated = true;

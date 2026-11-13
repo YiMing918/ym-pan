@@ -23,9 +23,12 @@ globalThis.fetch = async (url) => {
   if (/lanzou\w?\.com\/iAbCdEf$/.test(u)) return T('<html><iframe src="/fn?file=FILEID9" frameborder="0"></iframe></html>');
   if (u.includes('/fn?file=')) return T("<script>var ajax={data:{'sign':'SGN123'}};</script>");
   if (u.includes('ajaxm.php')) return J({ zt: 1, dom: 'https://dl.lanzou.example', url: 'tok999', inf: 'f.zip' });
-  if (u.includes('www.123pan.com/api/share/list')) return J({ code: 5112, message: 'need login' });
-  if (u.includes('www.123pan.cn/b/api/share/list')) return J({ code: 0, data: { InfoList: [{ FileId: 42, FileName: 'd.iso', Size: 1024, Type: 0, Etag: 'e1', S3KeyFlag: 's1' }] } });
-  if (u.includes('/api/file/download_info')) return J({ code: 0, data: { DownloadURL: 'https://dl.123.example/d.iso' } });
+  // 123 现行口径（v1.9.2 对齐）：主路线 yun.123pan.cn/b/api/share/get 故意失败，
+  // 验代码回退备域名 www.123865.com 同路径；取链走 www.123865.com/b/api/share/download/info。
+  // （旧打桩拦的 www.123pan.com/api/share/list 等端点已被现行代码弃用，注在 P-03/S3。）
+  if (u.includes('yun.123pan.cn/b/api/share/get')) return J({ code: 5112, message: 'need login' });
+  if (u.includes('www.123865.com/b/api/share/get')) return J({ code: 0, data: { InfoList: [{ FileId: 42, FileName: 'd.iso', Size: 1024, Type: 0, Etag: 'e1', S3KeyFlag: 's1' }], Next: '-1' } });
+  if (u.includes('www.123865.com/b/api/share/download/info')) return J({ code: 0, data: { DownloadURL: 'https://dl.123.example/d.iso' } });
   if (u.includes('get_share_access_token')) return J({ data: { accessToken: 'GYTOK1' } });
   if (u.includes('get_share_page_files_list')) return J({ data: { list: [{ fileId: 'g1', fileName: 'e.mkv', fileSize: 2048, resType: 1 }] } });
   if (u.includes('get_share_download_url')) return J({ data: { signedURL: 'https://dl.guangya.example/e.mkv' } });
@@ -72,13 +75,14 @@ r = await call({ drive: 'lanzou', action: 'list', url: 'https://www.lanzoui.com/
 chk('lanzou 直链', r.ok && r.kind === 'link' && r.url === 'https://dl.lanzou.example/file/tok999');
 
 r = await call({ drive: 'pan123', action: 'list', url: 'https://www.123pan.com/s/AbC-123', pwd: '', cred: {} });
-chk('123 回退备用路线', r.ok && /123pan\.cn/.test(r.ctx.route || '') && r.files[0].name === 'd.iso', JSON.stringify(r).slice(0, 200));
-d = await call({ drive: 'pan123', action: 'download', cred: {}, ctx: r.ctx, file: r.files[0] });
+// 断言取值全部加空守卫：单条用例失败只记 FAIL，不再抛 TypeError 崩掉整个套件（S3 的另一半）
+chk('123 回退备用路线', r.ok && /备域名/.test((r.ctx || {}).route || '') && ((r.files || [])[0] || {}).name === 'd.iso', JSON.stringify(r).slice(0, 200));
+d = await call({ drive: 'pan123', action: 'download', cred: {}, ctx: r.ctx, file: (r.files || [])[0] || {} });
 chk('123 link', d.ok && d.url.includes('dl.123.example'));
 
 r = await call({ drive: 'guangya', action: 'list', url: 'https://www.guangyapan.com/s/abc_def', cred: {} });
-chk('guangya list', r.ok && r.files[0].name === 'e.mkv', JSON.stringify(r).slice(0, 200));
-d = await call({ drive: 'guangya', action: 'download', cred: {}, ctx: r.ctx, file: r.files[0] });
+chk('guangya list', r.ok && ((r.files || [])[0] || {}).name === 'e.mkv', JSON.stringify(r).slice(0, 200));
+d = await call({ drive: 'guangya', action: 'download', cred: {}, ctx: r.ctx, file: (r.files || [])[0] || {} });
 chk('guangya link', d.ok && d.url.includes('dl.guangya.example'));
 
 console.log(`\nTOTAL pass=${pass} fail=${failN}`);

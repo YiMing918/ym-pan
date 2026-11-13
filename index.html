@@ -374,13 +374,18 @@ async function ownerApi(payload){
 
 function applyCredUpdate(drive, upd){
   if(!upd) return;
+  const op = localStorage.getItem('ympan_owner_pass');
   if(upd.fields){
+    // v1.9.2：续期字段先合并，再一次性写保险箱。此前逐字段各发一次 vault 请求，
+    // 配合后端整份覆盖会把先写的字段冲掉（阿里 aliAuth/aliRefresh 只剩一个）；
+    // 后端已改合并写入，这里把请求数也降下来，一次续期只写一次 KV。
+    const merged = {};
     for(const [k, v] of Object.entries(upd.fields)){
       saveCredField(k, v);
+      merged[k] = v;
       const inp = $('#cred_' + k); if(inp) inp.value = v;
-      const op = localStorage.getItem('ympan_owner_pass');
-      if(op) ownerApi({ action:'vault', pass:op, drive, cred:{ [k]: v } }).catch(()=>{});
     }
+    if(op && Object.keys(merged).length) ownerApi({ action:'vault', pass:op, drive, cred: merged }).catch(()=>{});
     toast('登录令牌已自动续期');
   }
   if(upd.cookie && (drive==='quark'||drive==='uc')){
@@ -388,7 +393,6 @@ function applyCredUpdate(drive, upd){
     saveCredField(key, upd.cookie);
     const inp=$('#cred_'+key); if(inp) inp.value=upd.cookie;
     toast('Cookie 已自动更新（__puus 轮换）');
-    const op = localStorage.getItem('ympan_owner_pass');
     if(op) ownerApi({ action:'vault', pass:op, drive, cred:{ [key]: upd.cookie } }).catch(()=>{});
   }
 }
