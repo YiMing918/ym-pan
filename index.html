@@ -95,6 +95,8 @@ ol.howto li{margin:3px 0}
     <div class="small" style="margin-bottom:6px">直链（有时效，过期重新解析）：</div>
     <div class="linkbox" id="linkUrl"></div>
     <div class="kv" id="linkHeaders" style="display:none"></div>
+    <div id="linkHeaderRows" style="display:none"></div>
+    <div class="hint" id="linkHeadWarn" style="display:none;color:#b45309"></div>
     <div class="hint" id="linkNote"></div>
     <div class="row" style="margin-top:9px">
       <button class="ghost" id="btnCopyLink">复制直链</button>
@@ -252,7 +254,7 @@ ol.howto li{margin:3px 0}
     <li><b>只产直链</b>：本站函数替你向各网盘官方接口问出真实下载地址，文件流量走你和网盘之间，不经过本站——所以不吃 Cloudflare 免费额度，也符合它的使用条款。</li>
     <li><b>只用你自己的凭证</b>：没有公共账号池（那种池子烧号、连坐封 IP、三天两头全灭）。速度和额度取决于你自己账号是不是会员。</li>
     <li><b>多路线互备</b>：123 有双接口路线、蓝奏有多个官方域名同码互备、夸克/UC 双网关——一条路线挂了会自动换另一条，解析结果旁会标明走了哪条。</li>
-    <li><b>部分直链要带请求头</b>：百度要带 UA + 你的 BDUSS，夸克/UC 要带 Cookie，阿里要带 Referer。结果区会给出「链接+请求头」和现成的 aria2 / cURL 命令，粘进下载器即可；1DM+ 在新建任务里能填请求头。</li>
+    <li><b>部分直链要带请求头</b>：百度要带 UA + 你的 BDUSS，夸克/UC 要带 Cookie，阿里要带 Referer。这类直链只复制链接、或把「链接+请求头」整段文本塞进下载器，都会被拒绝（下载器没有能整段粘贴的输入框）。结果区会把每个请求头拆成独立的「复制这一项」按钮：链接填网址栏、Cookie/UA/Referer 逐项填进 1DM+/ADM 新建任务的请求头设置；也可以直接用现成的 aria2 / cURL 命令（命令是完整可执行的，不用拆）。</li>
     <li><b>整个文件夹一次拿完</b>：列表上方「整夹递归取链」会把子文件夹全走一遍再逐个取链（上限 200 个文件、5 层深）；解析过的分享会记在「最近解析」里（只存本机），点一下就能重新解析；报错时点「复制诊断信息」发给站长，能少来回好几趟。</li>
     <li><b>实验支持的盘</b>：移动、天翼、小飞机、123、迅雷、光鸭接口变动频繁，已按在维护的开源项目口径实现，但可能需要按报错迭代。</li>
     <li><b>已知边界</b>：超大文件在夸克/UC 会先转存进你自己网盘再取链（会占你空间，可事后删）；百度风控最重，日解析量过大（社区口径约 200–300GB）会当日限流。</li>
@@ -404,6 +406,20 @@ function showLink(res){
   const lines=Object.entries(h).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`);
   const kv=$('#linkHeaders');
   if(lines.length){ kv.style.display='block'; kv.textContent='下载时要带上这组请求头：\n'+lines.join('\n'); } else kv.style.display='none';
+  // 逐项复制（2026-11-17 实测后改）：「链接+请求头」拼成一坨文本，下载器没有哪个输入框
+  // 能整段吞——URL 栏塞不进、请求头栏也被第一行链接污染。改成每个请求头一项、独立
+  // 复制按钮，逐项粘到 1DM+/ADM 新建任务的对应栏位；值不进 innerHTML（只渲染键名，
+  // 值走闭包复制），避免 Cookie 里的特殊字符把页面结构冲坏。
+  const rows=$('#linkHeaderRows');
+  const warn=$('#linkHeadWarn');
+  if(lines.length){
+    rows.style.display='block';
+    rows.innerHTML='<div class="small" style="margin:6px 0 2px">用手机下载器时，把每一项分别复制、填到新建任务对应的栏位里（链接填网址栏，下面各项填请求头设置）：</div>'
+      +Object.entries(h).filter(([,v])=>v).map(([k])=>`<div class="row" style="align-items:center;gap:6px;margin-top:4px"><span class="small" style="min-width:92px">${k}</span><button class="ghost" data-hk="${k}">复制这一项</button></div>`).join('');
+    rows.querySelectorAll('button[data-hk]').forEach(b=>{ b.onclick=()=>copyText(h[b.dataset.hk], b.dataset.hk+' 已复制，去填到下载器对应栏位'); });
+    warn.style.display='block';
+    warn.textContent='⚠ 这个平台的直链必须带请求头才能下载：只复制直链、或把整段文本塞进下载器，都会被拒绝。请逐项复制填入，或用 aria2 / cURL 命令。';
+  } else { rows.style.display='none'; warn.style.display='none'; }
   $('#linkNote').textContent=res.note||'';
   $('#batchLinks').innerHTML='';
   $('#linkWrap').style.display='block';
@@ -425,8 +441,8 @@ function ariaCmd(res){
   return c;
 }
 async function copyText(t, tip){ try{ await navigator.clipboard.writeText(t); toast(tip||'已复制'); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(tip||'已复制'); } }
-$('#btnCopyLink').onclick=()=> state.lastLink && copyText(state.lastLink.url,'直链已复制');
-$('#btnCopyFull').onclick=()=> state.lastLink && copyText(fullText(state.lastLink),'已复制（链接+请求头）');
+$('#btnCopyLink').onclick=()=>{ const r=state.lastLink; if(!r) return; const hasH=Object.values(r.headers||{}).some(Boolean); copyText(r.url, hasH?'直链已复制（⚠ 此平台还必须带请求头，只粘直链会被拒绝，见下方逐项复制）':'直链已复制'); };
+$('#btnCopyFull').onclick=()=> state.lastLink && copyText(fullText(state.lastLink),'已复制整段文本（注意：多数下载器不能整段粘贴，请用下方逐项复制）');
 $('#btnAria').onclick=()=> state.lastLink && copyText(ariaCmd(state.lastLink),'aria2 命令已复制');
 function curlCmd(res){
   const h=res.headers||{}; let c=`curl -L --retry 3 -C -`;
@@ -539,7 +555,7 @@ $('#btnBatch').onclick=async()=>{
   $('#linkWrap').style.display='block';
   if(state.batch.length){ $('#btnCopyAll').style.display=''; $('#btnDlTxt').style.display=''; }
 };
-$('#btnCopyAll').onclick=()=> copyText(state.batch.map(b=>b.url).join('\n'), '全部直链已复制（一行一条）');
+$('#btnCopyAll').onclick=()=>{ const hasH=state.batch.some(b=>Object.values(b.headers||{}).some(Boolean)); copyText(state.batch.map(b=>b.url).join('\n'), hasH?'全部直链已复制（⚠ 其中含必须带请求头的平台，只粘直链会被拒绝，建议用 aria2 格式导出）':'全部直链已复制（一行一条）'); };
 $('#btnDlTxt').onclick=()=>{
   const content=state.batch.map(b=>{
     let t=b.url+'\n  out='+ (b.name||'file');

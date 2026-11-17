@@ -378,7 +378,9 @@ const quark = quarkFamily('drive-pc.quark.cn', 'ucpro', '夸克');
 const uc = quarkFamily('pc-api.uc.cn', 'UCBrowser', 'UC');
 
 /* ================= 蓝奏云（免登录 · 多域名互备） =================
-   老流程：分享页 → iframe(/fn/ 或 /tp/) 子页拿 sign → POST ajaxm.php?action=downprocess。
+   流程：分享页拿 sign → POST apifile.woozooo.com/ajaxfile.php?action=downprocess。
+   sign 三种来源都认：iframe(/fn/ 或 /tp/) 子页、主页字面量、2026 新模板的主页
+   JS 变量（data 里以 sign:<变量名> 引用，变量先赋空再赋真值，取最后一次非空赋值）。
    蓝奏官方有多个等价域名，主域被挑战/被墙时同码换域名重试（天然多路由）。
    2026 起部分页面带 acw_sc__v2 JS 挑战，纯接口可能被拦——失败即如实报错。 */
 const LANZOU_MIRRORS = CONFIG.lanzouMirrors;
@@ -410,6 +412,9 @@ const lz = {
         // ajaxm 的 file 参数要的是主页里的数字 fid，不是分享代码（2026-11-10 真测定位）
         const fidM = html.match(/var\s+fid\s*=\s*(\d+)/);
         if (fidM) fileId = fidM[1];
+        // 2026 新模板把 ajaxfile.php?file=<数字 fid> 直接写在主页脚本里，优先采用
+        const fidA = html.match(/ajaxfile\.php\?file=(\d+)/);
+        if (fidA) fileId = fidA[1];
         if (fn) {
           const sub = fn[1].startsWith('http') ? fn[1] : `https://${host}${fn[1]}`;
           const sm = sub.match(/file=([A-Za-z0-9_-]+)/); if (sm && !fidM) fileId = sm[1];
@@ -428,6 +433,16 @@ const lz = {
         if (!sign) {
           const s = html.match(/'sign'\s*:\s*'([^']+)'/) || html.match(/wp_sign\s*=\s*'([^']+)'/);
           if (s) sign = s[1];
+        }
+        if (!sign) {
+          // 2026 新模板（真链实测）：主页没有 iframe、也没有 sign 字面量——sign 是主页
+          // JS 里的一个变量（先赋空串、再赋真值），ajax 的 data 里以 sign:<变量名>
+          // 引用。按变量名回主页取最后一次非空赋值即真 sign。
+          const varM = html.match(/['"]sign['"]\s*:\s*([A-Za-z_$][\w$]*)/);
+          const varName = varM ? varM[1] : 'isngis';
+          const esc = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const assigns = [...html.matchAll(new RegExp(`(?:var\\s+)?${esc}\\s*=\\s*'([^']*)'`, 'g'))].map(x => x[1]).filter(Boolean);
+          if (assigns.length) sign = assigns[assigns.length - 1];
         }
         if (!sign) throw new Error('没在页面里找到 sign（蓝奏改版或该链接是文件夹分享）');
         return { single: true, ctx: { host, sign, ajaxdata, fileId }, host };
@@ -963,19 +978,39 @@ const pan123 = {
     return s;
   },
   async resolveHops(u) {
+    // 2026-11-17 修复（下载实测定位）：签名参数 v/t/s 只挂在解码出的内层 URL 和第一跳
+    // Location 上；旧实现无条件跟跳转，跟到后面某跳只剩 xmfcid，返回的残链谁拉都是
+    // 403「not found t or s or v」。且最终节点对不带 Range 的 GET 直接回 403，只有
+    // 带 Range 才给 206——探测方式也得改。现口径：① 每跳带 Range: bytes=0-0 探测；
+    // ② 起点带签名时绝不跟进丢了签名的 Location（停在当前带签名 URL，下载器自己
+    // 跟跳转 + 带 Range 能下）；③ 206 或 200 文件响应即终点；④ 其余状态停在当前 URL。
+    const hasSig = (x) => { try { const q = new URL(x).searchParams; return q.has('t') && q.has('s'); } catch { return false; } };
     let cur = u;
+    const sig0 = hasSig(u);
     for (let hop = 0; hop < 5; hop++) {
-      const resp = await fetch(cur, { redirect: 'manual', headers: { 'User-Agent': 'Dart/3.12 (dart:io)', Referer: 'https://yun.123pan.cn/' } });
+      let resp;
+      try {
+        resp = await fetch(cur, { redirect: 'manual', headers: { 'User-Agent': 'Dart/3.12 (dart:io)', Referer: 'https://yun.123pan.cn/', Range: 'bytes=0-0' } });
+      } catch { break; }
       const loc = resp.headers.get('location');
-      if (resp.status >= 300 && resp.status < 400 && loc) { cur = loc; continue; }
-      const ct = resp.headers.get('content-type') || '';
-      const clen = Number(resp.headers.get('content-length') || 0);
-      if (/json/.test(ct) || (clen > 0 && clen <= 8192)) {
-        try {
-          const j = JSON.parse(await resp.text());
-          const ru = j && j.data && j.data.redirect_url;
-          if (ru) { cur = ru; continue; }
-        } catch { /* not json */ }
+      if (resp.status >= 300 && resp.status < 400 && loc) {
+        let next = loc;
+        try { next = new URL(loc, cur).toString(); } catch { /* 相对/异常 Location 用原文 */ }
+        if (sig0 && !hasSig(next)) break;
+        cur = next; continue;
+      }
+      if (resp.status === 206) break;
+      if (resp.status === 200) {
+        const ct = resp.headers.get('content-type') || '';
+        const clen = Number(resp.headers.get('content-length') || 0);
+        if (/json/.test(ct) || (clen > 0 && clen <= 8192)) {
+          try {
+            const j = JSON.parse(await resp.text());
+            const ru = j && j.data && j.data.redirect_url;
+            if (ru && !(sig0 && !hasSig(ru))) { cur = ru; continue; }
+          } catch { /* not json */ }
+        }
+        break;
       }
       break;
     }
@@ -1395,7 +1430,7 @@ export async function onRequest(context) {
   if (request.method === 'GET') {
     const u = new URL(request.url);
     if (u.searchParams.get('action') === 'health') return health(env);
-    return ok({ service: 'ym-pan parse api', version: '1.9.2', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.3', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
@@ -1489,35 +1524,83 @@ export async function onRequest(context) {
       }
     }
   } catch { /* 保险箱兜底失败就当没存过 */ }
-  // S2 中央闸：credUpdate 若源于 env 凭证（站长存的、匿名访客共用），整包扣下不回吐——
-  // 轮换后的 Cookie/令牌写进响应等于把新凭证发给任何访客。'req'（访客自己的）与
-  // 'vault'（站长口令门后，只有站长能触发、前端靠它回存保险箱）维持原样回吐。
-  const scrubEnvCredUpdate = (res) => {
-    if (!res || !res.credUpdate) return res;
+  // S3 中央闸（统一出口清洗）：凡来源为 env 的凭证（部署者在环境变量里配的、匿名访客
+  // 共用），其原文一律不得出现在最终响应的任何位置——S2 只扣 credUpdate 是不够的，
+  // 还有三条通道在漏：夸克/UC 列目录下发的 ctx.cookie（会话罐就是 env Cookie 本体）、
+  // 夸克/UC 登录路线取链回落的 headers.Cookie、天翼取链的 headers.Cookie（ctCookie 原文）。
+  // 处理分三层：① credUpdate：cookie 型源于 env 整包扣下（单个字符串没法按段洗）；
+  // fields 型改为按字段扣——只删 env 来源字段，其余字段照常回吐，不再整包连带删除
+  // （旧行为会把本地生成的设备号等无辜字段一起扣下）；② 结构位：ctx.cookie 置空
+  // （后续翻目录/取链由服务端按 env 凭证重建会话罐，行为不变，同百度 BDUSS 先例）、
+  // headers.Cookie 在 env 来源时删键（深扫只能抹掉未轮换的原文，轮换后的新值靠删键兜底）；
+  // ③ 兜底深扫：env 凭证原文（整串 + Cookie 单项 + 单项值）从响应每个字符串里抹除，
+  // 错误消息同样过一遍。'req'（访客自带）与 'vault'（站长口令门后、只有站长能触发）
+  // 来源不在清洗范围，站长管理自己凭证的流程照常。
+  const envSecrets = [];
+  {
     const src = body.credSrc || {};
-    const cu = res.credUpdate;
-    let envDerived = false;
-    if (cu.cookie) {
-      const key = drive === 'quark' ? 'quarkCookie' : drive === 'uc' ? 'ucCookie' : null;
-      envDerived = !!key && src[key] === 'env';
-    } else if (cu.fields) {
-      envDerived = Object.keys(cu.fields).some((k) => src[k] === 'env');
+    const seen = new Set();
+    const push = (s) => { if (typeof s === 'string' && s.length >= 4 && !seen.has(s)) { seen.add(s); envSecrets.push(s); } };
+    for (const [k, s] of Object.entries(src)) {
+      if (s !== 'env') continue;
+      const v = body.cred[k];
+      if (typeof v !== 'string' || !v) continue;
+      push(v);
+      for (const part of v.split(/;\s*/)) {
+        const p = part.trim();
+        if (!p) continue;
+        push(p);
+        const i = p.indexOf('=');
+        if (i > 0) push(p.slice(i + 1).trim());
+      }
     }
-    if (envDerived) delete res.credUpdate;
-    return res;
+    envSecrets.sort((a, b) => b.length - a.length);
+  }
+  const scrubStr = (s) => {
+    if (typeof s !== 'string' || !envSecrets.length) return s;
+    let out = s;
+    for (const sec of envSecrets) if (out.includes(sec)) out = out.split(sec).join('');
+    return out;
+  };
+  const scrubDeep = (node) => {
+    if (typeof node === 'string') return scrubStr(node);
+    if (Array.isArray(node)) { for (let i = 0; i < node.length; i++) node[i] = scrubDeep(node[i]); return node; }
+    if (node && typeof node === 'object') { for (const k of Object.keys(node)) node[k] = scrubDeep(node[k]); return node; }
+    return node;
+  };
+  const cookieKeyOf = drive === 'quark' ? 'quarkCookie' : drive === 'uc' ? 'ucCookie' : null;
+  const cookieFromEnv = !!cookieKeyOf && (body.credSrc || {})[cookieKeyOf] === 'env';
+  const scrubResponse = (res) => {
+    if (!res || typeof res !== 'object') return res;
+    const src = body.credSrc || {};
+    if (res.credUpdate) {
+      const cu = res.credUpdate;
+      if (cu.cookie) {
+        if (cookieFromEnv) delete res.credUpdate;
+      } else if (cu.fields) {
+        for (const k of Object.keys(cu.fields)) if (src[k] === 'env') delete cu.fields[k];
+        if (!Object.keys(cu.fields).length) delete res.credUpdate;
+      }
+    }
+    if (cookieFromEnv && res.ctx && typeof res.ctx.cookie === 'string') res.ctx.cookie = '';
+    if (res.headers && typeof res.headers.Cookie === 'string'
+      && (cookieFromEnv || (drive === 'ctyun' && src.ctCookie === 'env') || (drive === 'baidu' && src.bduss === 'env'))) {
+      delete res.headers.Cookie;
+    }
+    return scrubDeep(res);
   };
   try {
     if (body.action === 'download') {
       if (!adapter.download) return fail('该盘是单文件直达，没有单独的取链步骤');
-      const res = scrubEnvCredUpdate(await adapter.download(body, env));
+      const res = scrubResponse(await adapter.download(body, env));
       return ok({ drive, kind: 'link', ...res });
     }
-    const res = scrubEnvCredUpdate(await adapter.list(body, env));
+    const res = scrubResponse(await adapter.list(body, env));
     if (res.single) return ok({ drive, kind: 'link', ...res });
     // 各家列表接口单页上限多为 100：满 100 条时提示可能未显示全（不保证恰好 100 条时没有更多，宁可多提示）
     if (res && Array.isArray(res.files) && res.files.length >= 100) res.truncated = true;
     return ok({ drive, kind: 'list', ...res });
   } catch (e) {
-    return fail(e.message || String(e));
+    return fail(scrubStr(e.message || String(e)));
   }
 }

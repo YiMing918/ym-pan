@@ -41,16 +41,21 @@ return m[0].replace(/[)\].,，。]+$/, '');
 }
 
 export function detectPlatform(url) {
-const u = url.toLowerCase();
-if (/douyin\.com|iesdouyin\.com/.test(u)) return 'douyin';
-if (/kuaishou\.com|gifshow\.com/.test(u)) return 'kuaishou';
-if (/weibo\.(com|cn)|video\.weibo\.com|t\.cn\//.test(u)) return 'weibo';
-if (/xiaohongshu\.com|rednote\.com|xhslink\.(com|cn)/.test(u)) return 'xiaohongshu';
-if (/acfun\.cn/.test(u)) return 'acfun';
-if (/bilibili\.com|b23\.tv/.test(u)) return 'bilibili';
-if (/tiktok\.com|tiktokv\.com/.test(u)) return 'tiktok';
-if (/jimeng\.jianying\.com|dreamina\.(capcut\.com|jianying\.com)/.test(u)) return 'jimeng';
-if (/youtube\.com|youtu\.be/.test(u)) return 'youtube';
+// 主机名锚定匹配：只认 URL 的 hostname（精确相等或子域名后缀），不再对整段 URL 做
+// 字符串包含——旧写法会把 notdouyin.com、路径/参数里带域名的链接误判到别家解析器。
+let host = '';
+try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
+if (!host) return '';
+const is = (d) => host === d || host.endsWith('.' + d);
+if (is('douyin.com') || is('iesdouyin.com')) return 'douyin';
+if (is('kuaishou.com') || is('gifshow.com')) return 'kuaishou';
+if (is('weibo.com') || is('weibo.cn') || is('t.cn')) return 'weibo';
+if (is('xiaohongshu.com') || is('rednote.com') || is('xhslink.com') || is('xhslink.cn')) return 'xiaohongshu';
+if (is('acfun.cn')) return 'acfun';
+if (is('bilibili.com') || is('b23.tv')) return 'bilibili';
+if (is('tiktok.com') || is('tiktokv.com')) return 'tiktok';
+if (is('jimeng.jianying.com') || is('dreamina.capcut.com') || is('dreamina.jianying.com')) return 'jimeng';
+if (is('youtube.com') || is('youtu.be')) return 'youtube';
 return '';
 }
 
