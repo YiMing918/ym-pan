@@ -1046,7 +1046,11 @@ const pan123 = {
       throw new Error(fmtErr('123 取链失败', data));
     }
     const real = await pan123.resolveHops(pan123.decodeUrl(u));
-    return { url: real, name: file.name, headers: { Referer: 'https://yun.123pan.cn/' }, note: `123 直链有时效，下载时须带 Referer。${authed ? '（本次走了你的登录令牌通道）' : '（本次匿名通道直下）'}` };
+    // 2026-11-17 对照实测：匿名通道的签名与「调取链接口时的网络出口」绑定——本站在
+    // Cloudflare 出口签发的链，换到手机/下载器网络拉取会被 CDN 拒（download err
+    // 50001）；同出口签发的链实测可正常拉字节。这是 123 的平台限制、解析侧改不了，
+    // 只能在 note 里把话说清，别让用户以为是链接残缺或下载器的问题。
+    return { url: real, name: file.name, headers: { Referer: 'https://yun.123pan.cn/' }, note: `123 直链有时效，下载时须带 Referer。${authed ? '（本次走了你的登录令牌通道）' : '（本次匿名通道直下；匿名签名与取链时的网络出口绑定，换到手机/下载器常被 CDN 拒（50001），属 123 的限制，下不了请用 123 官方 App 或网页打开原分享下载）'}` };
   },
 };
 
