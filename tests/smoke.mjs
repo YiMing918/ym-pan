@@ -31,6 +31,9 @@ globalThis.fetch = async (url, opts = {}) => {
   // 123 跟跳签名场景（2026-11-17）：777001 跳转保留签名、节点要 Range 才给 206；777002 跳转丢签名
   if (u.includes('b/api/share/download/info') && String(opts.body || '').includes('777001')) return J({ code: 0, data: { DownloadURL: 'https://web123.example/download-v2/?params=' + Buffer.from('https://cdn123.example/inner?v=5&t=111&s=abc').toString('base64url') } });
   if (u.includes('b/api/share/download/info') && String(opts.body || '').includes('777002')) return J({ code: 0, data: { DownloadURL: 'https://web123.example/download-v2/?params=' + Buffer.from('https://cdn123.example/inner2?v=5&t=222&s=def').toString('base64url') } });
+  // 777003：params 用标准 base64（串里含 '/'），旧 decodeUrl 正则会截断解出裸链
+  if (u.includes('b/api/share/download/info') && String(opts.body || '').includes('777003')) return J({ code: 0, data: { DownloadURL: 'https://web123.example/download-v2/?params=' + Buffer.from('https://cdn123.example/ainner?v=5&t=111&s=abc&x=1').toString('base64') + '&is_s3=0' } });
+  if (u.includes('cdn123.example/ainner')) return (opts.headers && opts.headers.Range) ? new Response('x', { status: 206, headers: { 'content-type': 'application/octet-stream' } }) : J({ code: 1010, message: 'not found t or s or v' });
   if (u.includes('cdn123.example/inner2')) return new Response(null, { status: 302, headers: { location: 'https://node123.example/g.zip?xmfcid=z' } });
   if (u.includes('cdn123.example/inner')) return new Response(null, { status: 302, headers: { location: 'https://node123.example/f.zip?v=5&t=111&s=abc&xmfcid=y' } });
   if (u.includes('node123.example/')) return (opts.headers && opts.headers.Range) ? new Response('x', { status: 206, headers: { 'content-type': 'application/octet-stream' } }) : J({ code: 1010, message: 'not found t or s or v' });
@@ -117,6 +120,8 @@ d = await call({ drive: 'pan123', action: 'download', cred: {}, ctx: { key: 'tes
 chk('123 跟跳保留签名到节点链', d.ok && d.url === 'https://node123.example/f.zip?v=5&t=111&s=abc&xmfcid=y', JSON.stringify(d).slice(0, 200));
 d = await call({ drive: 'pan123', action: 'download', cred: {}, ctx: { key: 'testkey' }, file: { id: '777002', name: 'g.zip', size: 10, etag: 'e', s3: 's' } });
 chk('123 跳转丢签名时停在带签名链', d.ok && d.url === 'https://cdn123.example/inner2?v=5&t=222&s=def', JSON.stringify(d).slice(0, 200));
+d = await call({ drive: 'pan123', action: 'download', cred: {}, ctx: { key: 'testkey' }, file: { id: '777003', name: 'h.zip', size: 10, etag: 'e', s3: 's' } });
+chk('123 标准 base64 params 完整解码', d.ok && d.url === 'https://cdn123.example/ainner?v=5&t=111&s=abc&x=1', JSON.stringify(d).slice(0, 200));
 
 // detectPlatform 主机名锚定：仿冒域名/参数里带域名不再误判
 const { detectPlatform } = await import('../functions/api/video.js');

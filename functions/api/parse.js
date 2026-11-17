@@ -968,9 +968,17 @@ const pan123 = {
   },
   decodeUrl(u) {
     let s = String(u || '').trim();
-    const pm = s.match(/[?&]params=([A-Za-z0-9_-]+)/);
+    // params 是标准 base64（字母表含 + 与 /，还带 = 填充）：旧正则只认 URL-safe 字符集，
+    // 会在第一个 / 处把参数截断、解出没有签名参数的裸链（2026-11-17 实测定位的真根因）。
+    // 改为按 & 分隔整段取参，双字母表归一并补齐填充再解。
+    const pm = s.match(/[?&]params=([^&]+)/);
     if (pm) {
-      try { const dec = atob(pm[1].replace(/-/g, '+').replace(/_/g, '/')); if (/^https?:\/\//.test(dec)) return dec; } catch { /* fallthrough */ }
+      try {
+        let b64 = decodeURIComponent(pm[1]).replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
+        while (b64.length % 4) b64 += '=';
+        const dec = atob(b64);
+        if (/^https?:\/\//.test(dec)) return dec;
+      } catch { /* fallthrough */ }
     }
     if (!/^https?:\/\//.test(s) && /^[A-Za-z0-9+/=\s]+$/.test(s)) {
       try { const dec = atob(s.replace(/\s/g, '')); if (/^https?:\/\//.test(dec)) return dec; } catch { /* fallthrough */ }
