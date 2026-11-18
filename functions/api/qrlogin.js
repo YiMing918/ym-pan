@@ -216,10 +216,10 @@ const quark = {
     const token = j && j.data && ((j.data.members && j.data.members.token) || j.data.token);
     if (!token) throw new Error('获取二维码令牌失败：' + JSON.stringify(j).slice(0, 140));
     const biz = 'S%3Acustom%7COPT%3ASAREA%400%7COPT%3AIMMERSIVE%401%7COPT%3ABACK_BTN_STYLE%400';
-    return { qr: `https://su.quark.cn/4_eMHBJ?token=<redacted>&client_id=532&ssb=weblogin&uc_param_str=&uc_biz_str=${biz}`, params: { token, requestId } };
+    return { qr: `https://su.quark.cn/4_eMHBJ?token=${encodeURIComponent(token)}&client_id=532&ssb=weblogin&uc_param_str=&uc_biz_str=${biz}`, params: { token, requestId } };
   },
   async poll(p) {
-    const resp = await fetchT(`https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=532&v=1.2&token=<redacted>&request_id=${encodeURIComponent(p.requestId || '')}`, {
+    const resp = await fetchT(`https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=532&v=1.2&token=${encodeURIComponent(p.token)}&request_id=${encodeURIComponent(p.requestId || '')}`, {
       headers: { 'User-Agent': UA, Referer: 'https://pan.quark.cn/' },
     });
     const j = await resp.json().catch(() => null);

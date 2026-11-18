@@ -198,7 +198,11 @@ export async function onRequest(context) {
     const np = String(body.newPass || '');
     if (np.length < 6) return fail('新口令至少 6 位');
     await kv.put('owner_hash', await hashPassV2(np));
-    return json({ ok: true });
+    // 改口令一并轮换恢复码（与 setpass 同口径）：若口令与旧恢复码曾一并泄露，
+    // 只改口令挡不住对方用旧恢复码走 setpass 再改密。新码只在本次响应里明文出现一次。
+    const recovery = genRecovery();
+    await kv.put('owner_recovery_hash', await sha256hex(recovery.replace(/-/g, '')));
+    return json({ ok: true, recovery });
   }
 
   if (action === 'vault') {

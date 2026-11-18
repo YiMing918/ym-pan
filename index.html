@@ -317,6 +317,7 @@ const state = { drive:'baidu', ctx:null, files:[], stack:[], lastLink:null, batc
 let toastTimer;
 function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),2400); }
 function msg(kind, text){ const el=$('#parseMsg'); el.className='msg '+(kind||''); el.textContent=text||''; el.style.display=text?'':'none'; }
+function esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function fmtSize(n){ if(!n) return '—'; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return n.toFixed(n>=100?0:n>=10?1:2)+' '+u[i]; }
 function credKey(k){ return 'ympan_cred_'+k; }
 function loadCreds(){ const o={}; for(const c of CREDS){ const v=localStorage.getItem(credKey(c.key)); if(v) o[c.key]=v; } return o; }
@@ -497,7 +498,7 @@ function renderList(res){
   for(const f of state.files){
     const tr=document.createElement('tr');
     const cb = f.dir?'':`<input type="checkbox" class="pick" data-id="${CSS.escape(String(f.id))}">`;
-    tr.innerHTML=`<td style="width:26px">${cb}</td><td class="fname">${f.dir?'📁 ':'📄 '}${f.name.replace(/</g,'&lt;')}</td><td class="fsize">${f.dir?'':fmtSize(f.size)}</td><td style="width:74px;text-align:right"></td>`;
+    tr.innerHTML=`<td style="width:26px">${cb}</td><td class="fname">${f.dir?'📁 ':'📄 '}${esc(f.name)}</td><td class="fsize">${f.dir?'':fmtSize(f.size)}</td><td style="width:74px;text-align:right"></td>`;
     const cell=tr.lastElementChild;
     const btn=document.createElement('button'); btn.className='ghost'; btn.textContent=f.dir?'打开':'取链';
     btn.onclick=()=> f.dir ? openFolder(f) : getLink(f);
@@ -547,9 +548,9 @@ $('#btnBatch').onclick=async()=>{
   for(const f of files){
     try{
       const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:state.ctx, file:f });
-      if(res.ok){ state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>${res.url}</div>`; }
-      else html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>失败：${(res.error||'').replace(/</g,'&lt;')}</div>`;
-    }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${f.name.replace(/</g,'&lt;')}<br>失败：${e.message}</div>`; }
+      if(res.ok){ state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>${res.url}</div>`; }
+      else html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>失败：${esc(res.error||'')}</div>`;
+    }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>失败：${esc(e.message)}</div>`; }
     box.innerHTML=html;
   }
   $('#linkWrap').style.display='block';
@@ -599,15 +600,15 @@ $('#btnRecursive').onclick=async()=>{
   state.batch=[];
   const box=$('#batchLinks'); $('#linkWrap').style.display='block';
   if(!found.length){ box.innerHTML='<div class="small">这个文件夹（含子文件夹）里没找到文件'+(failedDirs.length?`；${failedDirs.length} 个子文件夹打开失败`:'')+'</div>'; btn.disabled=false; btn.textContent=oldTxt; return; }
-  const head=`<div class="small">整夹共 ${found.length} 个文件，逐个取链中…（上限 200 个文件 / 5 层深）${failedDirs.length?`；打不开的子文件夹：${failedDirs.map(s=>s.replace(/</g,'&lt;')).join('、')}`:''}</div>`;
+  const head=`<div class="small">整夹共 ${found.length} 个文件，逐个取链中…（上限 200 个文件 / 5 层深）${failedDirs.length?`；打不开的子文件夹：${failedDirs.map(s=>esc(s)).join('、')}`:''}</div>`;
   box.innerHTML=head;
   let html='';
   for(const it of found){
     try{
       const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:it.ctx, file:it.file });
-      if(res.ok){ res._label=it.label; state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${it.label.replace(/</g,'&lt;')}<br>${res.url}</div>`; }
-      else html+=`<div class="linkbox" style="margin-top:6px">${it.label.replace(/</g,'&lt;')}<br>失败：${(res.error||'').replace(/</g,'&lt;')}</div>`;
-    }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${it.label.replace(/</g,'&lt;')}<br>失败：${e.message}</div>`; }
+      if(res.ok){ res._label=it.label; state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>${res.url}</div>`; }
+      else html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>失败：${esc(res.error||'')}</div>`;
+    }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>失败：${esc(e.message)}</div>`; }
     box.innerHTML=head+html;
   }
   if(state.batch.length){ $('#btnCopyAll').style.display=''; $('#btnDlTxt').style.display=''; msg('okk', `整夹递归完成：${state.batch.length}/${found.length} 个文件拿到直链`); }
@@ -888,6 +889,7 @@ $('#btnDoChangePass').onclick = async ()=>{
   if(!d.ok) return toast(d.error || '改口令失败');
   localStorage.setItem('ympan_owner_pass', np);
   toast('口令已更新'); refreshOwner();
+  if(d.recovery) showRecovery(d.recovery); // 改口令已同步轮换恢复码，旧码作废，新码只显示这一次
 };
 refreshOwner();
 

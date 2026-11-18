@@ -15,6 +15,22 @@ function json(data, status = 200) {
   });
 }
 
+// 常量时间比对（与 owner.js 同款）：先对两侧各做 SHA-256 摘要，再逐字节 XOR 累加
+// 比较，全程不提前退出，消除逐字符短路带来的时序侧信道。
+async function timingEq(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ]);
+  const va = new Uint8Array(da);
+  const vb = new Uint8Array(db);
+  let d = 0;
+  for (let i = 0; i < va.length; i++) d |= va[i] ^ vb[i];
+  return d === 0;
+}
+
 class Jar {
   constructor(init = '') {
     this.map = new Map();
@@ -162,7 +178,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   if (request.method !== 'POST') return json({ ok: false, error: '只支持 POST' }, 405);
   if (!env.PAN_KV || !env.PATROL_KEY) return json({ ok: false, error: '巡检未启用（缺 KV 绑定或 PATROL_KEY）' });
-  if (request.headers.get('x-patrol-key') !== env.PATROL_KEY) return json({ ok: false, error: '巡检口令不对' }, 403);
+  if (!(await timingEq(request.headers.get('x-patrol-key') || '', env.PATROL_KEY))) return json({ ok: false, error: '巡检口令不对' }, 403);
   let body;
   try { body = await request.json(); } catch (e) { return json({ ok: false, error: '请求体不是 JSON' }); }
   if (body.drive !== 'quark') return json({ ok: false, error: '巡检目前只支持 quark（真解析自检）' });

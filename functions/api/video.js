@@ -808,13 +808,36 @@ export async function handleVideo(body) {
   }
 }
 
+// 解析限流（照 owner.js 的 KV 窗口计数模式）：同来源 IP 10 分钟内最多 30 次实际解析。
+// video 是子请求扇出最重的接口（单次解析最多十几二十个上游请求），此前无限流可被刷
+// Workers 子请求/CPU 配额。只有带链接的 POST 才计数（没链接的空请求不耗额度）；
+// 计数每次 1 次 KV 写，达到上限后只读不写（不让刷子在拦截期继续烧写额度）；
+// KV 未绑定时不拦，零配置部署不受影响。
+const VIDEO_RL_MAX = 30;
+const VIDEO_RL_WIN = 10 * 60 * 1000;
+async function videoRlOver(kv, request) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const key = 'rl:video:' + ip;
+  let r = { n: 0, winStart: 0 };
+  try { r = JSON.parse((await kv.get(key)) || '') || r; } catch {}
+  const now = Date.now();
+  if (!r.winStart || now - r.winStart > VIDEO_RL_WIN) { r.n = 0; r.winStart = now; }
+  if (r.n >= VIDEO_RL_MAX) return true;
+  r.n++;
+  try { await kv.put(key, JSON.stringify(r), { expirationTtl: 24 * 3600 }); } catch {}
+  return false;
+}
+
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   if (request.method === 'GET') {
     return json({ ok: true, service: 'ym-pan video api', platforms: Object.fromEntries(Object.entries(PLATFORMS).map(([k, v]) => [k, { name: v.name, tier: v.tier }])) });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body = {};
   try { body = await request.json(); } catch { return fail('请求体不是 JSON'); }
+  if (env && env.PAN_KV && extractUrl(body.text || body.url || '')) {
+    if (await videoRlOver(env.PAN_KV, request)) return fail('解析太频繁了，请 10 分钟后再试', 429);
+  }
   return handleVideo(body);
 }
