@@ -1,13 +1,8 @@
 # YM 网盘解析 · 只要直链版
 
-![Version](https://img.shields.io/badge/版本-v1.9.4-blue)
-![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue)
-![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4)
-![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
-
 把网盘分享链接解析成**真实直链**，交给 1DM+、ADM、aria2 等下载器下载；另带短视频去水印解析。部署在 Cloudflare Pages + Functions，免费额度内运行，**跟着本文一步一步做就能部署出你自己的一个站**。
+
+![Version](https://img.shields.io/badge/版本-v1.9.4-blue) ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020) ![License](https://img.shields.io/badge/license-MIT-green) ![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue) ![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4) ![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
 
 **[打开站点](https://pan.1m.us.ci) · [下载最新版](https://github.com/YiMing918/ym-pan/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-pan-guide)**
 
