@@ -133,7 +133,7 @@ function rsaEncrypt(n, e, message) {
 const baidu = {
   async start() {
     const gid = hexUuid().toUpperCase();
-    const u = `https://passport.baidu.com/v2/api/getqrcode?lp=pc&qrloginfrom=pc&gid=${gid}&callback=tangram_guid_${now()}&apiver=v3&tt=${now()}&tpl=netdisk&_=${now()}`;
+    const u = `https://passport.baidu.com/v2/api/getqrcode?lp=pc&qrloginfrom=pc&gid=${encodeURIComponent(gid)}&callback=tangram_guid_${now()}&apiver=v3&tt=${now()}&tpl=netdisk&_=${now()}`;
     const txt = await (await fetchT(u, { headers: { 'User-Agent': UA } })).text();
     const m = txt.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('百度二维码接口无响应');
@@ -145,7 +145,7 @@ const baidu = {
     return { qrImg: img, params: { sign: j.sign, gid } };
   },
   async poll(p) {
-    const u = `https://passport.baidu.com/channel/unicast?channel_id=${p.sign}&tpl=netdisk&gid=${p.gid}&callback=&apiver=v3&tt=${now()}&_=${now()}`;
+    const u = `https://passport.baidu.com/channel/unicast?channel_id=${encodeURIComponent(p.sign || '')}&tpl=netdisk&gid=${encodeURIComponent(p.gid || '')}&callback=&apiver=v3&tt=${now()}&_=${now()}`;
     let txt;
     try {
       const c = new AbortController(); const t = setTimeout(() => c.abort(), 40000);
@@ -158,7 +158,7 @@ const baidu = {
       if (j.errno === 0 && j.channel_v) { const cv = JSON.parse(j.channel_v); if (cv.status === 0 && cv.v) v = cv.v; else return { state: 'scanned' }; }
     } catch { /* 继续等待 */ }
     if (!v) return { state: 'waiting' };
-    const eu = `https://passport.baidu.com/v3/login/main/qrbdusslogin?v=${v}&bduss=${v}&loginVersion=v4&qrcode=1&tpl=netdisk&apiver=v3&tt=${now()}&traceid=&time=${Math.floor(now() / 1000)}&alg=v3&callback=`;
+    const eu = `https://passport.baidu.com/v3/login/main/qrbdusslogin?v=${encodeURIComponent(v)}&bduss=${encodeURIComponent(v)}&loginVersion=v4&qrcode=1&tpl=netdisk&apiver=v3&tt=${now()}&traceid=&time=${Math.floor(now() / 1000)}&alg=v3&callback=`;
     const resp = await fetchT(eu, { headers: { 'User-Agent': UA } });
     const cookies = parseCookies(resp);
     const txt2 = await resp.text();
@@ -209,7 +209,7 @@ const quark = {
   // uop.quark.cn 取令牌/换票据、pan.quark.cn 换 Cookie、drive-pc config 复核，勿改走 api.open.uc.cn。
   async start() {
     const requestId = uuid();
-    const resp = await fetchT(`https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=532&v=1.2&request_id=${requestId}`, {
+    const resp = await fetchT(`https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=532&v=1.2&request_id=${encodeURIComponent(requestId)}`, {
       method: 'POST', headers: { 'User-Agent': UA, Referer: 'https://pan.quark.cn/' },
     });
     const j = await resp.json().catch(() => null);
@@ -249,7 +249,7 @@ const quark = {
 const uc = {
   async start() {
     const r = await casStart(381, 300)();
-    return { qr: `https://su.uc.cn/1_n0ZCv?uc_param_str=dsdnfrpfbivesscpgimibtbmnijblauputogpintnwktprchmt&token=${r.token}&client_id=381&uc_biz_str=S%3Acustom%7CC%3Atitlebar_fix`, params: { token: r.token } };
+    return { qr: `https://su.uc.cn/1_n0ZCv?uc_param_str=dsdnfrpfbivesscpgimibtbmnijblauputogpintnwktprchmt&token=${encodeURIComponent(r.token)}&client_id=381&uc_biz_str=S%3Acustom%7CC%3Atitlebar_fix`, params: { token: r.token } };
   },
   async poll(p) {
     const r = await casPoll(381, p.token);
@@ -388,6 +388,16 @@ const cmcc = {
 
 /* ================= 天翼云盘（logbox oauth2） ================= */
 const C189_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0';
+// 天翼登录页服务端常量（C-40）：poll 的 Referer 绝不直接用客户端现传的 loginPageUrl——
+// 只认 start 时服务端已知的登录页主机（open.e.189.cn / cloud.189.cn 且 https），其余一律回落常量。
+const CTYUN_LOGIN_PAGE = 'https://open.e.189.cn/api/logbox/separate/web/index.html?appId=8025431004';
+function safeCtyunReferer(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    if (u.protocol === 'https:' && (u.hostname === 'open.e.189.cn' || u.hostname === 'cloud.189.cn')) return u.toString();
+  } catch { /* 落常量 */ }
+  return CTYUN_LOGIN_PAGE;
+}
 const ctyun = {
   async start() {
     let cloud = '', cloudDom = '', openE = '', loginPageUrl = 'https://open.e.189.cn/api/logbox/separate/web/index.html?appId=8025431004';
@@ -430,7 +440,7 @@ const ctyun = {
     const uj = await (await fetchT('https://open.e.189.cn/api/logbox/oauth2/getUUID.do', { method: 'POST', headers: uh, body: 'appId=8025431004' })).json().catch(() => null);
     if (!uj || !uj.uuid) throw new Error('天翼二维码获取失败：' + JSON.stringify(uj).slice(0, 140));
     // 官方页的码是 image.do 出的一张图（uuid 传 encodeuuid），不是把 uuid 文本画成码（2026-11-10 对照官方页 App.js 实证）
-    const qrImg = `https://open.e.189.cn/api/logbox/oauth2/image.do?uuid=${uj.encodeuuid || encodeURIComponent(uj.uuid)}&REQID=${reqId}`;
+    const qrImg = `https://open.e.189.cn/api/logbox/oauth2/image.do?uuid=${uj.encodeuuid || encodeURIComponent(uj.uuid)}&REQID=${encodeURIComponent(reqId)}`;
     return { qrImg, params: { uuid: uj.uuid, encryuuid: uj.encryuuid || '', lt, reqId, paramId, loginPageUrl, cloud, cloudDom, openE } };
   },
   async poll(p) {
@@ -445,7 +455,7 @@ const ctyun = {
       returnUrl: encodeURIComponent('https://m.cloud.189.cn/zhuanti/2020/loginErrorPc/index.html'),
       clientType: '1', timeStamp: String(Date.now()), cb_SaveName: '1', isOauth2: '', state: '', paramId: p.paramId || '',
     });
-    const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://open.e.189.cn', Referer: p.loginPageUrl || 'https://open.e.189.cn/', 'User-Agent': C189_UA };
+    const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://open.e.189.cn', Referer: safeCtyunReferer(p.loginPageUrl), 'User-Agent': C189_UA };
     if (p.reqId) headers.REQID = p.reqId;
     if (p.openE) headers.Cookie = p.openE;
     const resp = await fetchT('https://open.e.189.cn/api/logbox/oauth2/qrcodeLoginState.do', { method: 'POST', headers, body: body.toString() }, 30000).catch(() => null);
@@ -576,10 +586,10 @@ pan123.start = async function () {
     const r0 = await fetchT(P123_HOST + '/centerlogin', { headers: { 'User-Agent': P123_UA, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' } }, 20000);
     p.ck = cookieStr(parseCookies(r0));
   } catch { /* 建会话失败不硬停，下一步会直接暴露问题 */ }
-  const j = await (await fetchT(`${P123_HOST}/api/user/qr-code/generate?uniID=${uuid()}`, { headers: p123Headers(p) }, 20000)).json().catch(() => null);
+  const j = await (await fetchT(`${P123_HOST}/api/user/qr-code/generate?uniID=${encodeURIComponent(uuid())}`, { headers: p123Headers(p) }, 20000)).json().catch(() => null);
   if (!j || j.code !== 0 || !j.data || !j.data.uniID) throw new Error('123 扫码二维码生成失败：' + (j ? (j.message || 'code ' + j.code) : '上游无响应，请稍后重试'));
   const page = j.data.url || 'https://yun.123pan.cn/wx-app-login.html';
-  return { qr: `${page}?uniID=${j.data.uniID}&env=production&source=123pan&type=login`, params: { uniID: j.data.uniID, loginuuid: p.loginuuid, ck: p.ck } };
+  return { qr: `${page}?uniID=${encodeURIComponent(j.data.uniID)}&env=production&source=123pan&type=login`, params: { uniID: j.data.uniID, loginuuid: p.loginuuid, ck: p.ck } };
 };
 
 async function p123Exchange(p) {
@@ -687,7 +697,9 @@ export async function onRequest(context) {
       const NAME = '小飞机';
       const username = String(body.username || '').trim(), password = String(body.password || '');
       if (!username || !password) throw new Error(`请填${NAME}的账号和密码`);
-      // 账密登录会透传官方接口换令牌：按来源 IP 限流防匿名撞库（15 分钟最多 30 次尝试）
+      // 账密登录会透传官方接口换令牌：按来源 IP 限流防匿名撞库（15 分钟最多 30 次尝试）。
+      // 照 video.js 口径（C-15）：先读判超限，超限直接拒、绝不写 KV（旧写法先 put 再判，
+      // 被拦的请求也在烧写额度、还会把计数越推越高）；计数写只在放行路径发生。
       if (env && env.PAN_KV) {
         const ip = request.headers.get('cf-connecting-ip') || 'unknown';
         const key = 'rl:pwdlogin:' + ip;
@@ -695,9 +707,9 @@ export async function onRequest(context) {
         try { r = JSON.parse((await env.PAN_KV.get(key)) || '') || r; } catch {}
         const now = Date.now();
         if (!r.winStart || now - r.winStart > 15 * 60 * 1000) { r.n = 0; r.winStart = now; }
+        if (r.n >= 30) throw new Error('登录尝试太频繁，请 15 分钟后再试');
         r.n++;
         try { await env.PAN_KV.put(key, JSON.stringify(r), { expirationTtl: 2 * 24 * 3600 }); } catch {}
-        if (r.n > 30) throw new Error('登录尝试太频繁，请 15 分钟后再试');
       }
       const r = await feijipan.login(username, password);
       return json({ ok: true, drive, ...r });

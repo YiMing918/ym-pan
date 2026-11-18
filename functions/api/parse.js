@@ -384,6 +384,13 @@ const uc = quarkFamily('pc-api.uc.cn', 'UCBrowser', 'UC');
    蓝奏官方有多个等价域名，主域被挑战/被墙时同码换域名重试（天然多路由）。
    2026 起部分页面带 acw_sc__v2 JS 挑战，纯接口可能被拦——失败即如实报错。 */
 const LANZOU_MIRRORS = CONFIG.lanzouMirrors;
+// 蓝奏主机名校验（C-10）：与镜像表同口径——根域须是 lanzou<单字母>.com / lanzou.com /
+// ilanzou.com（镜像表 lanzoui/x/o/q/p/h 均为单字母），或其子域名。用户链接里的主机名
+// 不过这关就不能当 first 用（否则任意第三方主机可被当蓝奏页抓取/回显域名）。
+function isLanzouHost(host) {
+  const h = String(host || '').toLowerCase().replace(/\.$/, '');
+  return /^([a-z0-9-]+\.)*(lanzou[a-z]?\.com|ilanzou\.com)$/.test(h);
+}
 const lz = {
   hosts(url) {
     const m = url.match(/([A-Za-z0-9-]+)\.(lanzou[a-z]?\.com|ilanzou\.com|lanzoui\.com)/i);
@@ -391,7 +398,8 @@ const lz = {
     if (!code) throw new Error('没认出蓝奏分享链接');
     const seen = new Set(); const list = [];
     const fm = url.match(/^https:\/\/([A-Za-z0-9.-]+)/);
-    const first = fm ? fm[1] : null; // 非 https 输入不再抛 TypeError，退回镜像域名轮试
+    const firstRaw = fm ? fm[1] : null; // 非 https 输入不再抛 TypeError，退回镜像域名轮试
+    const first = firstRaw && isLanzouHost(firstRaw) ? firstRaw : null;
     for (const h of [first, ...LANZOU_MIRRORS.map(d => (m ? m[1] + '.' : 'ww') + d), ...LANZOU_MIRRORS.map(d => 'ww.' + d)]) {
       if (h && !seen.has(h)) { seen.add(h); list.push(h); }
     }
@@ -623,7 +631,9 @@ const cmcc = {
     }
     const pCaID = (ctx && ctx.dir) ? String(ctx.dir) : 'root';
     const files = [];
-    for (let begin = 1; begin <= 20000; begin += 200) {
+    let truncated = false;
+    // 分页硬顶 20 页（C-36）：步长 200/页，最多列 4000 项；满页跑满硬顶说明可能还有更多，标 truncated
+    for (let begin = 1, page = 0; begin <= 20000 && page < 20; begin += 200, page++) {
       const d = await cmcc.call('getOutLinkInfoV6', { getOutLinkInfoReq: { account: '', linkID: linkId, passwd, caSrt: 1, coSrt: 1, srtDr: 0, bNum: begin, pCaID, eNum: begin + 199 } });
       const data = cmcc.checkOk(d, '列目录', userPwd);
       const ca = Array.isArray(data.caLst) ? data.caLst : [];
@@ -631,8 +641,9 @@ const cmcc = {
       for (const f of ca) files.push({ id: String(f.caID || ''), name: f.caName || '', size: 0, dir: true });
       for (const f of co) files.push({ id: String(f.coID || ''), name: f.coName || '', size: f.coSize || 0, dir: f.isdir === true || f.coType === 2 });
       if (ca.length + co.length < 200) break;
+      if (page === 19) truncated = true;
     }
-    return { ctx: { linkId, passwd }, files, path: '/', route: '分享网关·加密口径', title };
+    return { ctx: { linkId, passwd }, files, path: '/', route: '分享网关·加密口径', title, ...(truncated ? { truncated: true } : {}) };
   },
   async download(cred, env, ctx, file) {
     const account = cmcc.account(cred);
@@ -714,7 +725,9 @@ const ctyun = {
     }
     const dirId = (ctx && ctx.dir) || rootId;
     const files = [];
-    for (let page = 1; page <= 50; page++) {
+    let truncated = false;
+    // 分页硬顶 20 页（C-36，原 50）：满页跑满硬顶标 truncated
+    for (let page = 1; page <= 20; page++) {
       const params = {
         pageNum: String(page), pageSize: '100', fileId: String(dirId), shareDirFileId: String(dirId),
         isFolder: 'true', shareId: String(shareId), shareMode: String(shareMode), iconOption: '5',
@@ -742,11 +755,12 @@ const ctyun = {
       for (const f of fo) files.push({ id: String(f.id), name: f.name, size: 0, dir: true });
       for (const f of fl) files.push({ id: String(f.id), name: f.name, size: f.size || 0, dir: false });
       if (fl.length + fo.length < 100) break;
+      if (page === 20) truncated = true;
     }
     if (!files.length && shareFileName && rootId && !infoIsFolder) {
       files.push({ id: String(rootId), name: shareFileName, size: 0, dir: false });
     }
-    return { ctx: { code, accessCode, shareId, shareMode, rootId }, files, path: '/', route: '签名口径' };
+    return { ctx: { code, accessCode, shareId, shareMode, rootId }, files, path: '/', route: '签名口径', ...(truncated ? { truncated: true } : {}) };
   },
   async download(cred, env, ctx, file) {
     const jar = new Jar(cred.ctCookie || '');
@@ -940,7 +954,9 @@ const pan123 = {
   },
   async tryList(host, key, pwd, parentId) {
     const all = [];
-    for (let page = 1; page <= 50; page++) {
+    let truncated = false;
+    // 分页硬顶 20 页（C-36，原 50）：满页跑满硬顶标 truncated（挂在数组上由 list() 转成响应字段）
+    for (let page = 1; page <= 20; page++) {
       const params = new URLSearchParams({ limit: '100', next: '0', orderBy: 'file_name', orderDirection: 'asc', shareKey: key, ParentFileId: String(parentId || 0), Page: String(page) });
       if (pwd) params.set('SharePwd', pwd);
       const r = await reqJson(`https://${host}/b/api/share/get?${params}`, { headers: { 'User-Agent': 'Dart/3.12 (dart:io)' } });
@@ -948,7 +964,9 @@ const pan123 = {
       const list = r.data.data.InfoList || [];
       all.push(...list);
       if (r.data.data.Next === '-1' || !list.length) break;
+      if (page === 20) truncated = true;
     }
+    all.truncated = truncated;
     return all;
   },
   async list(url, pwd, cred, env, ctx) {
@@ -964,7 +982,7 @@ const pan123 = {
       id: String(f.FileId), name: f.FileName, size: f.Size || 0,
       dir: f.Type === 1 || f.Type === '1', etag: f.Etag || '', s3: f.S3KeyFlag || '',
     }));
-    return { ctx: { key, dir: parentId, route }, files, path: parentId === '0' ? '/' : parentId, route };
+    return { ctx: { key, dir: parentId, route }, files, path: parentId === '0' ? '/' : parentId, route, ...(items.truncated ? { truncated: true } : {}) };
   },
   decodeUrl(u) {
     let s = String(u || '').trim();
@@ -1437,12 +1455,30 @@ async function health(env) {
   return ok({ health: results, at: new Date().toISOString() });
 }
 
+// 解析限流（C-36，照 video.js 口径）：同来源 IP 10 分钟内最多 30 次实际解析
+// （list/download 才计数，GET 信息/自检不计）。先读判超限：超限直接拒、绝不写 KV；
+// 计数写只在放行路径发生一次。KV 未绑定时不拦，零配置部署不受影响。
+const PARSE_RL_MAX = 30;
+const PARSE_RL_WIN = 10 * 60 * 1000;
+async function parseRlOver(kv, request) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const key = 'rl:parse:' + ip;
+  let r = { n: 0, winStart: 0 };
+  try { r = JSON.parse((await kv.get(key)) || '') || r; } catch {}
+  const now = Date.now();
+  if (!r.winStart || now - r.winStart > PARSE_RL_WIN) { r.n = 0; r.winStart = now; }
+  if (r.n >= PARSE_RL_MAX) return true;
+  r.n++;
+  try { await kv.put(key, JSON.stringify(r), { expirationTtl: 24 * 3600 }); } catch {}
+  return false;
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   if (request.method === 'GET') {
     const u = new URL(request.url);
     if (u.searchParams.get('action') === 'health') return health(env);
-    return ok({ service: 'ym-pan parse api', version: '1.9.4', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.6', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
@@ -1450,6 +1486,9 @@ export async function onRequest(context) {
   const drive = body.drive;
   const adapter = ADAPTERS[drive];
   if (!adapter) return fail(`不支持的网盘：${drive || '(空)'}`);
+  if ((body.action === 'list' || body.action === 'download') && env && env.PAN_KV) {
+    if (await parseRlOver(env.PAN_KV, request)) return fail('解析太频繁了，请 10 分钟后再试', 429);
+  }
   const reqCred = {};
   for (const [k, v] of Object.entries(body.cred || {})) {
     if (typeof v === 'string' && v.trim()) reqCred[k] = v;
@@ -1523,14 +1562,19 @@ export async function onRequest(context) {
           if (vc) for (const [k, v] of Object.entries(vc)) {
             if (typeof v === 'string' && v && !body.cred[k]) { body.cred[k] = v; body.credSrc[k] = 'vault'; }
           }
-        } else {
+        } else if (!locked) {
+          // 失败计数写只在未锁定（放行校验）的路径发生（C-15）：已锁定期间绝不
+          // 再写 KV——上方 locked 时 oh 为空本就进不来，这里再把守卫写进计数块本身。
           try {
             const now = Date.now();
             const r = (rl && typeof rl === 'object') ? rl : { fails: 0, winStart: 0, lockUntil: 0 };
-            if (!r.winStart || now - r.winStart > 15 * 60 * 1000) { r.fails = 0; r.winStart = now; r.lockUntil = 0; }
-            r.fails++;
-            if (r.fails >= 10) r.lockUntil = now + 15 * 60 * 1000;
-            await kv.put(rlKey, JSON.stringify(r), { expirationTtl: 2 * 24 * 3600 });
+            if (r.lockUntil && r.lockUntil > now) { /* 已锁定：不计数、不写 */ }
+            else {
+              if (!r.winStart || now - r.winStart > 15 * 60 * 1000) { r.fails = 0; r.winStart = now; r.lockUntil = 0; }
+              r.fails++;
+              if (r.fails >= 10) r.lockUntil = now + 15 * 60 * 1000;
+              await kv.put(rlKey, JSON.stringify(r), { expirationTtl: 2 * 24 * 3600 });
+            }
           } catch { /* 计数失败不影响正常解析 */ }
         }
       }

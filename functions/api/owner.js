@@ -87,6 +87,9 @@ async function rlFail(kv, request, ip) {
   let r = { fails: 0, winStart: 0, lockUntil: 0 };
   try { r = JSON.parse((await kv.get(key)) || '') || r; } catch {}
   const now = Date.now();
+  // 已在锁定期内就不再计数、不再写 KV（C-15：计数写只发生在放行/失败计数路径，
+  // 被拦期间反复写只会白烧 KV 写额度并顺延锁；调用方在锁定状态本就先拒，这里再兜一层）。
+  if (r.lockUntil && r.lockUntil > now) return;
   if (!r.winStart || now - r.winStart > 15 * 60 * 1000) { r.fails = 0; r.winStart = now; r.lockUntil = 0; }
   r.fails++;
   if (r.fails >= 10) r.lockUntil = now + 15 * 60 * 1000;
@@ -119,18 +122,26 @@ export async function onRequest(context) {
     return json({ ok: true, setupUntil: new Date(until).toISOString() });
   }
 
-  if (action === 'status') {
+  // 保险箱清单（验口令成功后才回，C-41）：哪些家存了凭证、夸克巡检是否绑定，
+  // 未解锁时都是不该免鉴权外泄的信息，status 不再带。
+  async function vaultInfo() {
     const vaulted = [];
     for (const d of Object.keys(VAULT_KEYS)) {
       if (await kv.get('vault_' + d)) vaulted.push(d);
     }
+    return {
+      hasRecovery: !!(await kv.get('owner_recovery_hash')),
+      vaulted,
+      quarkBound: !!(await kv.get('quark_cookie')),
+    };
+  }
+
+  if (action === 'status') {
+    // 免鉴权状态只回开机必需的最小集：有没有口令、设置窗口开没开。
     return json({
       ok: true,
       hasPass: !!(await kv.get('owner_hash')),
-      hasRecovery: !!(await kv.get('owner_recovery_hash')),
       setupOpen: await setupOpen(kv),
-      vaulted,
-      quarkBound: !!(await kv.get('quark_cookie')),
     });
   }
 
@@ -186,7 +197,7 @@ export async function onRequest(context) {
   await rlClear(kv, rl.ip);
   if (chk.upgrade) await kv.put('owner_hash', chk.upgrade);
 
-  if (action === 'verify') return json({ ok: true });
+  if (action === 'verify') return json({ ok: true, ...(await vaultInfo()) });
 
   if (action === 'regen-recovery') {
     const recovery = genRecovery();

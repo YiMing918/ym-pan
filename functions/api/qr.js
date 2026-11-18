@@ -6,6 +6,38 @@
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const CLIENT_ID = '532';
 
+// 常量时间比对（与 owner.js/patrol.js 同款 timingEq）：两侧先 SHA-256 摘要再逐字节 XOR 累加。
+async function timingEq(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ]);
+  const va = new Uint8Array(da);
+  const vb = new Uint8Array(db);
+  let d = 0;
+  for (let i = 0; i < va.length; i++) d |= va[i] ^ vb[i];
+  return d === 0;
+}
+
+// start 限流（照 video.js 口径，C-16）：同 IP 10 分钟最多 30 次发码；先读判超限，
+// 超限直接拒、绝不写 KV；计数写只在放行路径发生。poll/status 不计数（poll 是高频轮询）。
+const QR_RL_MAX = 30;
+const QR_RL_WIN = 10 * 60 * 1000;
+async function qrRlOver(kv, request) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const key = 'rl:qr:' + ip;
+  let r = { n: 0, winStart: 0 };
+  try { r = JSON.parse((await kv.get(key)) || '') || r; } catch {}
+  const now = Date.now();
+  if (!r.winStart || now - r.winStart > QR_RL_WIN) { r.n = 0; r.winStart = now; }
+  if (r.n >= QR_RL_MAX) return true;
+  r.n++;
+  try { await kv.put(key, JSON.stringify(r), { expirationTtl: 24 * 3600 }); } catch {}
+  return false;
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -38,33 +70,42 @@ async function enabled(env) {
 async function start(request, env) {
   const kv = await enabled(env);
   if (!kv) return json({ ok: false, error: '巡检未启用：需要先给项目绑定 KV（PAN_KV）并配置 PATROL_KEY 环境变量' });
+  if (await qrRlOver(kv, request)) return json({ ok: false, error: '发码太频繁了，请 10 分钟后再试' }, 429);
   const existing = await kv.get('quark_cookie');
-  if (existing && request.headers.get('x-patrol-key') !== env.PATROL_KEY) {
+  if (existing && !(await timingEq(request.headers.get('x-patrol-key') || '', env.PATROL_KEY))) {
     return json({ ok: false, error: '巡检凭证已绑定。如需重绑，请管理员带巡检口令操作' });
   }
   const requestId = crypto.randomUUID();
-  const r = await fetch(`https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=${CLIENT_ID}&v=1.2&request_id=${requestId}`, {
+  const r = await fetch(`https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=${CLIENT_ID}&v=1.2&request_id=${encodeURIComponent(requestId)}`, {
     method: 'POST', headers: { 'User-Agent': UA, Referer: 'https://pan.quark.cn/' },
   });
   const data = await r.json().catch(() => null);
   const token = data && data.data && data.data.members && data.data.members.token;
   if (!token) return json({ ok: false, error: '夸克二维码令牌获取失败，上游可能改版' });
-  await kv.put('qr_pending', JSON.stringify({ token, requestId }), { expirationTtl: 300 });
+  // 会话按随机 session id 分槽（C-16）：并发/多标签页发码互不覆盖，poll 必须带 id 来查自己那槽。
+  const id = crypto.randomUUID();
+  await kv.put('qr_pending:' + id, JSON.stringify({ token, requestId }), { expirationTtl: 300 });
   return json({
-    ok: true, token,
+    ok: true, id, token,
     // 二维码内容格式照 xiaoya-alist 久经验证的实现：ssb 必须为 weblogin 且要带 uc_biz_str，
     // 否则夸克 App 扫码后会直接报「登录请求已过期」（2026-11-07 站长实测踩坑）。
     qr: `https://su.quark.cn/4_eMHBJ?token=${encodeURIComponent(token)}&client_id=${CLIENT_ID}&ssb=weblogin&uc_param_str=&uc_biz_str=S%3Acustom%7COPT%3ASAREA%400%7COPT%3AIMMERSIVE%401%7COPT%3ABACK_BTN_STYLE%400`,
   });
 }
 
-async function poll(env) {
+async function poll(request, env) {
   const kv = await enabled(env);
   if (!kv) return json({ ok: false, error: '巡检未启用' });
-  const pendingRaw = await kv.get('qr_pending');
+  // poll 必须带 start 回的 session id（C-16）：没带 id 不再读任何全局槽，直接明确报错让前端重新发码。
+  const id = new URL(request.url).searchParams.get('id') || '';
+  if (!id) return json({ ok: false, state: 'error', error: '缺少会话 id，请重新生成二维码' });
+  const pendingKey = 'qr_pending:' + id;
+  const pendingRaw = await kv.get(pendingKey);
   if (!pendingRaw) return json({ ok: true, state: 'expired' });
-  const { token, requestId } = JSON.parse(pendingRaw);
-  const r = await fetch(`https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=${CLIENT_ID}&v=1.2&token=${encodeURIComponent(token)}&request_id=${requestId}`, {
+  let token, requestId;
+  try { ({ token, requestId } = JSON.parse(pendingRaw)); } catch { return json({ ok: true, state: 'expired' }); }
+  if (!token) return json({ ok: true, state: 'expired' });
+  const r = await fetch(`https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=${CLIENT_ID}&v=1.2&token=${encodeURIComponent(token)}&request_id=${encodeURIComponent(requestId)}`, {
     headers: { 'User-Agent': UA, Referer: 'https://pan.quark.cn/' },
   });
   const data = await r.json().catch(() => null);
@@ -100,7 +141,7 @@ async function poll(env) {
     return json({ ok: false, state: 'error', error: 'Cookie 验证未通过（config 接口未返回 200）' });
   }
   await kv.put('quark_cookie', cookie);
-  await kv.delete('qr_pending');
+  await kv.delete(pendingKey);
   return json({ ok: true, state: 'done' });
 }
 
@@ -108,7 +149,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   try {
-    if (url.searchParams.get('action') === 'poll') return poll(env);
+    if (url.searchParams.get('action') === 'poll') return poll(request, env);
     if (url.searchParams.get('action') === 'status') {
       const kv = await enabled(env);
       if (!kv) return json({ ok: true, enabled: false });

@@ -667,6 +667,7 @@ $('#btnQr').onclick=async()=>{
     try{
       const r=await fetch('/api/qr'); const d=await r.json();
       if(!d.ok){ $('#qrHint').textContent='❌ '+(d.error||'生成失败'); btn.disabled=false; btn.textContent='生成二维码'; return; }
+      const qrSessionId = d.id || ''; // 会话分槽 id：poll 必须带它查自己那一槽（后端已按 id 存）
       $('#qrBox').style.display='block'; drawQr(d.qr);
       let left=170;
       $('#qrHint').textContent='用夸克 App 扫这张码，扫完马上在夸克里点「确认登录」（还剩 '+left+' 秒，过期会自动换新码）';
@@ -676,7 +677,7 @@ $('#btnQr').onclick=async()=>{
         if(Date.now()>deadline){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='等太久先停了，准备好后重新点生成，扫完立刻确认'; btn.textContent='重新生成二维码'; return; }
         if(left<0){ clearInterval(qrTimer); $('#qrHint').textContent='上一张过期了，正在自动换新码…'; cycle(); return; }
         try{
-          const pr=await fetch('/api/qr?action=poll'); const pd=await pr.json();
+          const pr=await fetch('/api/qr?action=poll&id='+encodeURIComponent(qrSessionId)); const pd=await pr.json();
           if(pd.state==='done'){ clearInterval(qrTimer); qrTimer=null; $('#qrHint').textContent='✅ 绑定成功，巡检凭证已保存'; toast('巡检凭证绑定成功'); qrStatus(); btn.textContent='重新生成二维码'; }
           else if(pd.state==='scanned'){ $('#qrHint').textContent='已扫码！现在就在夸克 App 里点「确认登录」，别切走'; }
           else if(pd.state==='expired'){ clearInterval(qrTimer); $('#qrHint').textContent='上一张过期了，正在自动换新码，用新码再扫一次…'; cycle(); }
@@ -775,7 +776,14 @@ async function refreshOwner(){
   try{
     const r = await fetch('/api/owner?action=status'); const d = await r.json();
     if(!d.ok) { $('#ownerState').textContent='不可用'; return; }
-    const unlocked = !!localStorage.getItem('ympan_owner_pass');
+    // status 现在只回最小集（hasPass/setupOpen）；保险箱清单改走 verify（验口令成功后才回）
+    let unlocked = !!localStorage.getItem('ympan_owner_pass');
+    let vaulted = [], quarkBound = false;
+    if(d.hasPass && unlocked){
+      const vd = await ownerApi({ action:'verify', pass: localStorage.getItem('ympan_owner_pass') });
+      if(vd.ok){ vaulted = vd.vaulted || []; quarkBound = !!vd.quarkBound; }
+      else { unlocked = false; } // 本设备存的口令已失效（在别处改过口令）：按未解锁显示，等重新输入
+    }
     $('#ownerState').textContent = d.hasPass ? (unlocked ? '已解锁' : '已设口令') : '未设口令';
     $('#ownerState').className = 'badge' + (unlocked ? ' ok' : '');
     $('#ownerNoPass').style.display = d.hasPass ? 'none' : 'block';
@@ -787,14 +795,15 @@ async function refreshOwner(){
       $('#btnUnlock').style.display = unlocked ? 'none' : '';
       $('#btnLock').style.display = unlocked ? '' : 'none';
       $('#inOwnerPass').style.display = unlocked ? 'none' : '';
-      const names = d.vaulted.map(v=>DRIVE_NAME[v]||v);
+      if(!unlocked){ $('#ownerVaultInfo').textContent = '保险箱里已存：解锁后可见'; markVaultStates([]); return; }
+      const names = vaulted.map(v=>DRIVE_NAME[v]||v);
       let info = '保险箱里已存：' + (names.length ? names.join('、') : '（暂无）');
-      if(d.quarkBound && !d.vaulted.includes('quark')) info += '；夸克已扫码绑定，自动可用';
-      if(d.vaulted.length){
-        info += '　清除：' + d.vaulted.map(v=>`<a href="javascript:void(0)" data-unvault="${v}">${DRIVE_NAME[v]||v}</a>`).join(' ');
+      if(quarkBound && !vaulted.includes('quark')) info += '；夸克已扫码绑定，自动可用';
+      if(vaulted.length){
+        info += '　清除：' + vaulted.map(v=>`<a href="javascript:void(0)" data-unvault="${v}">${DRIVE_NAME[v]||v}</a>`).join(' ');
       }
       $('#ownerVaultInfo').innerHTML = info;
-      markVaultStates(d.vaulted);
+      markVaultStates(vaulted);
       document.querySelectorAll('[data-unvault]').forEach(a=>{ a.onclick = async ()=>{
         const op = localStorage.getItem('ympan_owner_pass');
         if(!op) return toast('先解锁再清除');

@@ -34,6 +34,113 @@ return { res, text: await res.text(), finalUrl: res.url};
 } finally { clearTimeout(t);}
 }
 
+/* ---- 通用兜底专用 SSRF 护栏（C-9，精简版）----
+   只给 parseGeneric（未识别平台整页抓取）用：已识别平台走各自固定上游域名，
+   不经这里。规则：只许 http/https、无内嵌凭证；主机名字面量拦截环回/私网/
+   链路本地/保留段与 localhost/.local/.internal；重定向逐跳手动跟随、每跳复检；
+   正文流式读、超 2MB 放弃；整链总超时 10 秒。不做 DNS 解析（rebinding 不在此层）。 */
+const GENERIC_MAX_BYTES = 2 * 1024 * 1024;
+const GENERIC_TIMEOUT_MS = 10000;
+function ipv4Blocked(a, b, c, d) {
+if ([a, b, c, d].some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+if (a === 0 || a === 10 || a === 127) return true;
+if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+if (a === 169 && b === 254) return true; // 链路本地（含云元数据）
+if (a === 172 && b >= 16 && b <= 31) return true;
+if (a === 192 && b === 168) return true;
+if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
+if (a === 198 && (b === 18 || b === 19)) return true;
+if (a === 198 && b === 51 && c === 100) return true;
+if (a === 203 && b === 0 && c === 113) return true;
+if (a >= 224) return true; // 组播 + 保留（含 255.255.255.255）
+return false;
+}
+function ipv6Blocked(host) {
+let h = host.toLowerCase();
+if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
+const zone = h.indexOf('%'); if (zone >= 0) h = h.slice(0, zone);
+const lastColon = h.lastIndexOf(':');
+if (lastColon >= 0 && h.slice(lastColon + 1).includes('.')) { // 内嵌点分 IPv4 尾（::ffff:127.0.0.1）
+const p = h.slice(lastColon + 1).split('.').map(Number);
+if (p.length !== 4) return true;
+if (ipv4Blocked(p[0], p[1], p[2], p[3])) return true;
+h = h.slice(0, lastColon + 1) + ((p[0] << 8) | p[1]).toString(16) + ':' + ((p[2] << 8) | p[3]).toString(16);
+}
+const halves = h.split('::');
+if (halves.length > 2) return true;
+const side = (s) => (s === '' ? [] : s.split(':').map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN)));
+const left = side(halves[0]), right = halves.length === 2 ? side(halves[1]) : [];
+if (left.some(Number.isNaN) || right.some(Number.isNaN)) return true;
+let g;
+if (halves.length === 2) { const miss = 8 - left.length - right.length; if (miss < 0) return true; g = [...left, ...Array(miss).fill(0), ...right]; }
+else { if (left.length !== 8) return true; g = left; }
+if (g.every((x) => x === 0)) return true; // :: 未指定
+if (g.slice(0, 7).every((x) => x === 0) && g[7] === 1) return true; // ::1
+if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10
+if ((g[0] & 0xfe00) === 0xfc00) return true; // fc00::/7
+if ((g[0] & 0xff00) === 0xff00) return true; // ff00::/8 组播
+if (g[0] === 0x2001 && g[1] === 0x0db8) return true; // 文档段
+if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return ipv4Blocked((g[6] >> 8) & 255, g[6] & 255, (g[7] >> 8) & 255, g[7] & 255); // v4 映射
+return false;
+}
+export function isBlockedHost(host) {
+let h = (host || '').toLowerCase();
+if (h.endsWith('.')) h = h.slice(0, -1);
+if (!h) return true;
+if (h === 'localhost' || h === 'localdomain') return true;
+if (['.localhost', '.local', '.internal', '.lan', '.home', '.corp', '.intranet', '.private'].some((s) => h.endsWith(s))) return true;
+if (h.includes(':') || (h.startsWith('[') && h.endsWith(']'))) return ipv6Blocked(h);
+if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) { const p = h.split('.').map(Number); return ipv4Blocked(p[0], p[1], p[2], p[3]); }
+if (h.split('.').every((p) => /^(0x[0-9a-f]+|\d+)$/i.test(p))) return true; // 整数/十六进制等怪写 IP 字面量一律拒（URL 解析通常已归一化，这里兜底）
+return false;
+}
+function assertSafeGenericUrl(input) {
+let u;
+try { u = input instanceof URL ? input : new URL(String(input)); } catch { throw new Error('链接格式不对'); }
+if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('只支持 http/https 链接');
+if (u.username || u.password) throw new Error('链接里不能带账号密码');
+if (isBlockedHost(u.hostname)) throw new Error('这个地址是内网/本机地址，不能解析');
+return u;
+}
+export async function safeFetchText(input, { ua = UA_DESKTOP, headers = {}, timeoutMs = GENERIC_TIMEOUT_MS, maxBytes = GENERIC_MAX_BYTES } = {}) {
+let url = assertSafeGenericUrl(input);
+const ctl = new AbortController();
+const timer = setTimeout(() => ctl.abort(), timeoutMs);
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+try {
+for (let hop = 0; hop <= 5; hop++) {
+const res = await fetch(url.toString(), { method: 'GET', redirect: 'manual', signal: ctl.signal, headers: { 'User-Agent': ua, 'Accept-Language': 'zh-CN,zh;q=0.9', ...headers } });
+const loc = res.headers && typeof res.headers.get === 'function' ? res.headers.get('location') : null;
+if (REDIRECTS.has(res.status) && loc) {
+if (hop === 5) throw new Error('跳转次数过多');
+let next; try { next = new URL(loc, url); } catch { throw new Error('跳转地址格式不对'); }
+assertSafeGenericUrl(next); // 每一跳都复检，私网跳转整链放弃
+try { if (res.body) await res.body.cancel(); } catch { /* ignore */ }
+url = next; continue;
+}
+// 流式读正文：边读边计数，超上限立刻断流放弃，不把整页吞进内存
+if (!res.body || typeof res.body.getReader !== 'function') {
+const text = await res.text();
+if (new TextEncoder().encode(text).length > maxBytes) throw new Error('页面过大（超过 2MB），已放弃抓取');
+return { res, text, finalUrl: url.toString() };
+}
+const reader = res.body.getReader();
+const chunks = []; let total = 0;
+for (;;) {
+const { done, value } = await reader.read();
+if (done) break;
+total += value.length;
+if (total > maxBytes) { try { await reader.cancel(); } catch { /* ignore */ } throw new Error('页面过大（超过 2MB），已放弃抓取'); }
+chunks.push(value);
+}
+const buf = new Uint8Array(total); let off = 0;
+for (const c of chunks) { buf.set(c, off); off += c.length; }
+return { res, text: new TextDecoder().decode(buf), finalUrl: url.toString() };
+}
+throw new Error('跳转次数过多');
+} finally { clearTimeout(timer); }
+}
+
 export function extractUrl(text) {
 const m = String(text || '').match(/https?:\/\/[^\s，。；！？、《》"'<>]+/);
 if (!m) return '';
@@ -780,8 +887,8 @@ function parseYoutube(rawUrl) {
 }
 
 /* ---------------- 通用兜底：OpenGraph ---------------- */
-async function parseGeneric(rawUrl) {
-  const { text: html, finalUrl } = await fetchText(rawUrl, { ua: UA_DESKTOP });
+export async function parseGeneric(rawUrl) {
+  const { text: html, finalUrl } = await safeFetchText(rawUrl, { ua: UA_DESKTOP });
   const og = (prop) => { const mm = html.match(new RegExp(`<meta[^>]+property=["']og:${prop}["'][^>]+content=["']([^"']+)`, 'i')) || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:${prop}["']`, 'i')); return mm ? mm[1] : ''; };
   const v = og('video:secure_url') || og('video') || og('video:url');
   if (!v) throw new Error('这个平台还没接入，且页面里也没找到公开视频地址');
