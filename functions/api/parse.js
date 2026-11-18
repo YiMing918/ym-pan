@@ -1478,7 +1478,7 @@ export async function onRequest(context) {
   if (request.method === 'GET') {
     const u = new URL(request.url);
     if (u.searchParams.get('action') === 'health') return health(env);
-    return ok({ service: 'ym-pan parse api', version: '1.9.6', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.7', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
