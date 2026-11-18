@@ -4,7 +4,7 @@
 
 ![Version](https://img.shields.io/badge/版本-v1.9.5-blue) ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020) ![License](https://img.shields.io/badge/license-MIT-green) ![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue) ![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4) ![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
 
-**[打开站点](https://pan.1m.us.ci) · [下载最新版](https://github.com/YiMing918/ym-pan/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-pan-guide)**
+**[下载最新版](https://github.com/YiMing918/ym-pan/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-pan-guide)**
 
 > **定位说清楚**：本站只产直链、**不中转文件流量**（不违反 CF 条款、不吃带宽额度）；解析只用**你自己账号**的凭证调官方接口，没有公共账号池——速度与额度取决于你自己的账号等级。别人家的「免登录解析站」登的是站长养的别人账号（烧号连坐），本站不做那种。
 
@@ -555,7 +555,7 @@ fetch('/api/owner', { method: 'POST', headers: { 'Content-Type': 'application/js
 仓库里的看门狗机器人每天自动巡检线上站点 + 全部接口，修不了的问题会在仓库 **Issues**（问题帖）里开一张带 `watchdog` 标签的报告。**新手须知：看到这种机器人开的 Issue 别慌——那是自检报告，不是你的站被人攻击了**，照报告里写的内容处理（或等它自愈/等更新后）关掉即可。
 
 **第三层：ym-dash 外部探活（自动，每 30 分钟）**
-作者另有一套站点健康看板 **ym-dash** 在盯着本站：它每 30 分钟从外部请求一次 https://pan.1m.us.ci ，看板上绿灯/红灯 + 响应时间一目了然。你部署自己的站也可以这样盯：
+作者另有一套站点健康看板 **ym-dash** 在盯着本站：它每 30 分钟从外部请求一次本站首页，看板上绿灯/红灯 + 响应时间一目了然。你部署自己的站也可以这样盯：
 - 若你也部署了 ym-dash（同一作者的测活看板项目）：打开 ym-dash → 登录 → 在站点管理里点**添加站点** → 名称填 `ym-pan`（随便起）、地址填**你自己的站点地址**（如 `https://ym-pan.pages.dev` 或你绑的自定义域）→ 保存。**做到这里你应该看到**：看板列表里出现你刚加的站，等一轮（最迟 30 分钟）或手动点一次检测，状态变绿就是探活在正常工作了。
 - 没有 ym-dash 也行：任何「网站可用性监测」服务（如 UptimeRobot，免费）新建一个 HTTP 监测、填你的站点地址，效果一样。
 
