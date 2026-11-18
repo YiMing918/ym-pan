@@ -97,12 +97,24 @@ def probe_structure():
 def probe_qrlogin():
     # 扫码登录通道探针（v1.6）：逐家调起始接口，能发码 = 通道活着；
     # 某家改版/下线这里先发现（开 Issue 留痕），访客可退回手填凭证。
+    # v1.9.5 加一条内容断言：start 返回的二维码 URL 里带的 token 必须与
+    # 同时返回的 params.token（轮询时用的那个）一致——v1.9.4 前夸克的
+    # 二维码 URL 里 token 被写成占位符长达十天，本探针只验「能发码」、
+    # 从没验过码里装的是什么，一直没发现。不一致 = 码扫了也登不上，
+    # 直接判巡检失败留痕。
     for drive in ['baidu', 'aliyun', 'quark', 'uc', 'cmcc', 'ctyun', 'guangya', 'pan123', 'xunlei']:
         st, txt = http(BASE + f'/api/qrlogin?drive={drive}&action=start', timeout=60)
         try:
             d = json.loads(txt)
             if st != 200 or d.get('ok') is not True or not (d.get('qr') or d.get('qrImg')):
                 problems.append(f'扫码登录探针 {drive} 异常：HTTP {st}，返回 {txt[:140]}')
+                continue
+            qr_url = d.get('qr') or ''
+            want = (d.get('params') or {}).get('token')
+            if want and 'token=' in qr_url:
+                got = urllib.parse.parse_qs(urllib.parse.urlparse(qr_url).query).get('token', [''])[0]
+                if got != want:
+                    problems.append(f'扫码登录探针 {drive} 二维码 token 与轮询 token 不一致（码里={got[:24]}…，轮询={str(want)[:24]}…），扫码必然登不上')
         except Exception:
             problems.append(f'扫码登录探针 {drive} 返回非 JSON：HTTP {st} {txt[:80]}')
 
