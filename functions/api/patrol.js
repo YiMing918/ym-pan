@@ -9,6 +9,12 @@
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+// 带超时的 fetch（H4，与 qrlogin.js fetchT 同口径 25 秒）：巡检任一上游挂起时掐断，不拖死整轮自检。
+async function fetchT(url, opts = {}, ms = 25000) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: c.signal }); } finally { clearTimeout(t); }
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -67,7 +73,7 @@ async function quarkPatrol(kv, url, pwd) {
   const H = { 'Content-Type': 'application/json', Referer: 'https://pan.quark.cn/' };
   let stage = 'token';
   try {
-    const t = await fetch(`${base}/share/sharepage/token?${qNow()}`, {
+    const t = await fetchT(`${base}/share/sharepage/token?${qNow()}`, {
       method: 'POST', headers: { ...H, Cookie: jar.str() }, body: JSON.stringify({ pwd_id: pwdId, passcode: pwd || '' }),
     });
     jar.absorb(t);
@@ -77,7 +83,7 @@ async function quarkPatrol(kv, url, pwd) {
     }
     const stoken = td.data.stoken;
     stage = 'list';
-    const d = await fetch(`${base}/share/sharepage/detail?${qNow()}&pwd_id=${pwdId}&stoken=${encodeURIComponent(stoken)}&pdir_fid=0&force=0&_page=1&_size=100&_sort=file_type:asc,file_name:asc`, {
+    const d = await fetchT(`${base}/share/sharepage/detail?${qNow()}&pwd_id=${pwdId}&stoken=${encodeURIComponent(stoken)}&pdir_fid=0&force=0&_page=1&_size=100&_sort=file_type:asc,file_name:asc`, {
       headers: { Referer: 'https://pan.quark.cn/', Cookie: jar.str() },
     });
     jar.absorb(d);
@@ -93,7 +99,7 @@ async function quarkPatrol(kv, url, pwd) {
     // file/download 必须带官方 PC 客户端 UA（LinkSwift/kownload 同口径）：网页 UA 会被当游客档限大文件（23018）
     const DL_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.20.0 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch';
     const dlCall = async (withCookie, body, tag) => {
-      const r = await fetch(`${base}/file/download?${qNow()}`, {
+      const r = await fetchT(`${base}/file/download?${qNow()}`, {
         method: 'POST', headers: { ...(withCookie ? { ...H, Cookie: jar.str() } : { ...H }), 'User-Agent': DL_UA },
         body: JSON.stringify(body),
       });
@@ -116,7 +122,7 @@ async function quarkPatrol(kv, url, pwd) {
     if (!link) {
       // 路线 C：转存到自己盘根目录 → 轮询任务到 status==2 → 用新 fid 取链（body 只有 fids）
       stage = 'save';
-      const sv = await fetch(`${base}/share/sharepage/save?${qNow()}`, {
+      const sv = await fetchT(`${base}/share/sharepage/save?${qNow()}`, {
         method: 'POST', headers: { ...H, Cookie: jar.str() },
         body: JSON.stringify({ fid_list: [f0.fid], fid_token_list: f0.share_fid_token ? [f0.share_fid_token] : [], to_pdir_fid: '0', pwd_id: pwdId, stoken, pdir_fid: '0', scene: 'link' }),
       });
@@ -127,7 +133,7 @@ async function quarkPatrol(kv, url, pwd) {
       let savedFid = '';
       for (let i = 0; i < 15 && !savedFid; i++) {
         await new Promise(r => setTimeout(r, 1000));
-        const t = await fetch(`${base}/task?${qNow()}&task_id=${taskId}&retry_index=${i}`, { headers: { Referer: 'https://pan.quark.cn/', Cookie: jar.str() } });
+        const t = await fetchT(`${base}/task?${qNow()}&task_id=${taskId}&retry_index=${i}`, { headers: { Referer: 'https://pan.quark.cn/', Cookie: jar.str() } });
         jar.absorb(t);
         const td2 = await t.json().catch(() => null);
         const data = td2 && td2.data;
@@ -144,7 +150,7 @@ async function quarkPatrol(kv, url, pwd) {
       route = 'save';
       // 尽力清理转存件（失败不算巡检失败，正式解析的转存件本来也会留在用户根目录）
       try {
-        await fetch(`${base}/file/delete?${qNow()}`, {
+        await fetchT(`${base}/file/delete?${qNow()}`, {
           method: 'POST', headers: { ...H, Cookie: jar.str() },
           body: JSON.stringify({ action_type: 1, filelist: [savedFid], exclude_fids: [] }),
         });
@@ -159,7 +165,7 @@ async function quarkPatrol(kv, url, pwd) {
     try {
       const probeHeaders = { Range: 'bytes=0-1023', 'User-Agent': DL_UA, Referer: 'https://pan.quark.cn/' };
       if (route !== 'guest') probeHeaders.Cookie = jar.str();
-      const pr = await fetch(link, { headers: probeHeaders });
+      const pr = await fetchT(link, { headers: probeHeaders });
       linkProbe = String(pr.status);
       if ([403, 404, 410].includes(pr.status)) {
         return { ok: false, stage: 'linkprobe', error: `直链已签发但拉字节被拒（HTTP ${pr.status}），链不可用` };

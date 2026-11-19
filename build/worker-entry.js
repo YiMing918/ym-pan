@@ -18,7 +18,7 @@
 // _headers：高级模式下平台不再应用 _headers。原版口径是「_headers 只管静态
 // 层响应、不管函数响应」（函数响应里的 no-store 都是函数自己设的，线上实测），
 // 故本入口只给资产层出来的响应按 _headers 的两条规则补头（/api/* 的
-// Cache-Control: no-store 与 /* 的两个安全头），函数响应原样返回。
+// Cache-Control: no-store 与 /* 的安全头组），函数响应原样返回。
 
 import { onRequest as owner } from '../functions/api/owner.js';
 import { onRequest as parse } from '../functions/api/parse.js';
@@ -37,11 +37,17 @@ const ROUTES = {
 };
 
 // 与仓库根 _headers 一致（改 _headers 时同步改这里）：[路径前缀, 要补的头]
+// 安全头口径（H5）：CSP 为克制版——本站页面只有内联脚本/样式、同源接口调用，
+// 图片/视频封面来自各平台 CDN 故 img-src/media-src 放行 https:，其余默认只许同源。
 const HEADER_RULES = [
   ['/api/', [['Cache-Control', 'no-store']]],
   ['/', [
     ['X-Content-Type-Options', 'nosniff'],
     ['Referrer-Policy', 'no-referrer'],
+    ['Strict-Transport-Security', 'max-age=31536000; includeSubDomains'],
+    ['X-Frame-Options', 'DENY'],
+    ['Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()'],
+    ['Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self'; font-src 'self' data:; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"],
   ]],
 ];
 

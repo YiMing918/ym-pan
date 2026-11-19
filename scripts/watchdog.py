@@ -255,14 +255,15 @@ def mechanical_fixes():
         if is_dead:
             notes.append(f'蓝奏镜像 {d} 疑似失效（{why}）')
     if alive and (alive != mirrors or dead):
-        kept = alive + [d for d in dead if len(alive) + dead.index(d) < 2] if len(alive) < 2 else alive
+        # 活的不足 2 个时，按原顺序保留排在前面的死镜像补够 2 个（宁可留一个疑似死的，也别只剩单条路线）
+        kept = alive + dead[:max(0, 2 - len(alive))]
         new_mirrors = kept
         if new_mirrors != mirrors:
             fixes.append(f'蓝奏镜像重排：活 {alive}' + (f'，摘掉 {dead}' if len(alive) >= 2 else ''))
     # 123 路线：第一条连接级死、第二条活 → 交换
     if len(bases) >= 2:
-        d0, _ = strict_dead(bases[0] + '/share/list?limit=1&shareKey=x&ParentFileId=0')
-        d1, _ = strict_dead(bases[1] + '/share/list?limit=1&shareKey=x&ParentFileId=0')
+        d0, _ = strict_dead(bases[0] + '/share/get?limit=1&shareKey=x&ParentFileId=0')
+        d1, _ = strict_dead(bases[1] + '/share/get?limit=1&shareKey=x&ParentFileId=0')
         if d0 and not d1:
             new_bases = [bases[1], bases[0]] + bases[2:]
             fixes.append('123 路线交换：主接口连接级失败，已把备用接口提为主')
@@ -380,7 +381,7 @@ def main():
         hb_ok = heartbeat()
     report_issue()
     print(json.dumps({'problems': problems, 'fixes': fixes, 'notes': notes}, ensure_ascii=False, indent=1))
-    return 0 if hb_ok else 1
+    return 0 if (hb_ok and not problems) else 1
 
 
 if __name__ == '__main__':

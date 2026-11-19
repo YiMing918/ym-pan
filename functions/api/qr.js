@@ -38,6 +38,12 @@ async function qrRlOver(kv, request) {
   return false;
 }
 
+// 带超时的 fetch（H4，与 qrlogin.js fetchT 同口径 25 秒）：上游挂起时掐断，避免巡检绑定请求无限等待。
+async function fetchT(url, opts = {}, ms = 25000) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: c.signal }); } finally { clearTimeout(t); }
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -76,7 +82,7 @@ async function start(request, env) {
     return json({ ok: false, error: '巡检凭证已绑定。如需重绑，请管理员带巡检口令操作' });
   }
   const requestId = crypto.randomUUID();
-  const r = await fetch(`https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=${CLIENT_ID}&v=1.2&request_id=${encodeURIComponent(requestId)}`, {
+  const r = await fetchT(`https://uop.quark.cn/cas/ajax/getTokenForQrcodeLogin?client_id=${CLIENT_ID}&v=1.2&request_id=${encodeURIComponent(requestId)}`, {
     method: 'POST', headers: { 'User-Agent': UA, Referer: 'https://pan.quark.cn/' },
   });
   const data = await r.json().catch(() => null);
@@ -105,7 +111,7 @@ async function poll(request, env) {
   let token, requestId;
   try { ({ token, requestId } = JSON.parse(pendingRaw)); } catch { return json({ ok: true, state: 'expired' }); }
   if (!token) return json({ ok: true, state: 'expired' });
-  const r = await fetch(`https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=${CLIENT_ID}&v=1.2&token=${encodeURIComponent(token)}&request_id=${encodeURIComponent(requestId)}`, {
+  const r = await fetchT(`https://uop.quark.cn/cas/ajax/getServiceTicketByQrcodeToken?client_id=${CLIENT_ID}&v=1.2&token=${encodeURIComponent(token)}&request_id=${encodeURIComponent(requestId)}`, {
     headers: { 'User-Agent': UA, Referer: 'https://pan.quark.cn/' },
   });
   const data = await r.json().catch(() => null);
@@ -119,12 +125,12 @@ async function poll(request, env) {
   }
   // 拿到 service ticket → 换登录 Cookie
   const jar = new Jar();
-  const info = await fetch(`https://pan.quark.cn/account/info?st=${encodeURIComponent(ticketM[1])}`, {
+  const info = await fetchT(`https://pan.quark.cn/account/info?st=${encodeURIComponent(ticketM[1])}`, {
     headers: { 'User-Agent': UA }, redirect: 'follow',
   });
   jar.absorb(info);
   // 再访问一次网盘页补齐业务 Cookie
-  const home = await fetch('https://pan.quark.cn/', {
+  const home = await fetchT('https://pan.quark.cn/', {
     headers: { 'User-Agent': UA, Cookie: jar.str() }, redirect: 'follow',
   });
   jar.absorb(home);
@@ -133,7 +139,7 @@ async function poll(request, env) {
     return json({ ok: false, state: 'error', error: '已扫码但没换到有效 Cookie（缺 __puus），请重试一次' });
   }
   // 验证 Cookie 能调业务接口
-  const cfg = await fetch('https://drive-pc.quark.cn/1/clouddrive/config?pr=ucpro&fr=pc', {
+  const cfg = await fetchT('https://drive-pc.quark.cn/1/clouddrive/config?pr=ucpro&fr=pc', {
     headers: { 'User-Agent': UA, Cookie: cookie, Referer: 'https://pan.quark.cn/' },
   });
   const cfgData = await cfg.json().catch(() => null);

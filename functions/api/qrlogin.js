@@ -22,6 +22,39 @@ async function fetchT(url, opts = {}, ms = 25000) {
   const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
   try { return await fetch(url, { ...opts, signal: c.signal }); } finally { clearTimeout(t); }
 }
+/* ---------- 扫码限流（H3） ----------
+   start：与 qr.js 同口径的 KV 窗口限流（同 IP 10 分钟最多 30 次发码，先读判超限、
+   超限直接拒绝不写 KV，计数写只在放行路径发生）；KV 未绑定时不拦，零配置部署不受影响。
+   poll：前端每 0.5~2.5 秒轮询一次（百度 0.5 秒、4 分钟上限约 480 次），若走 KV 计数
+   每次轮询都要烧一次 KV 写额度（免费版每天 1000 次），故 poll 只做进程内宽松上限
+   （同 IP 10 分钟 900 次，超了才拒），不写 KV；进程内计数随 isolate 回收清零，属尽力而为。 */
+const QRLOGIN_START_MAX = 30;
+const QRLOGIN_POLL_MAX = 900;
+const QRLOGIN_RL_WIN = 10 * 60 * 1000;
+async function qrloginStartOver(kv, request) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const key = 'rl:qrlogin:' + ip;
+  let r = { n: 0, winStart: 0 };
+  try { r = JSON.parse((await kv.get(key)) || '') || r; } catch {}
+  const now = Date.now();
+  if (!r.winStart || now - r.winStart > QRLOGIN_RL_WIN) { r.n = 0; r.winStart = now; }
+  if (r.n >= QRLOGIN_START_MAX) return true;
+  r.n++;
+  try { await kv.put(key, JSON.stringify(r), { expirationTtl: 24 * 3600 }); } catch {}
+  return false;
+}
+const _pollHits = new Map();
+function qrloginPollOver(request) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const now = Date.now();
+  let r = _pollHits.get(ip);
+  if (!r || now - r.winStart > QRLOGIN_RL_WIN) { r = { n: 0, winStart: now }; _pollHits.set(ip, r); }
+  if (_pollHits.size > 1000) { for (const [k, v] of _pollHits) if (now - v.winStart > QRLOGIN_RL_WIN) _pollHits.delete(k); }
+  if (r.n >= QRLOGIN_POLL_MAX) return true;
+  r.n++;
+  return false;
+}
+
 function parseCookies(resp) {
   const out = {};
   let arr = [];
@@ -717,16 +750,28 @@ export async function onRequest(context) {
     const d = DRIVES[drive];
     if (!d) throw new Error('这家暂不支持扫码登录');
     if (action === 'start') {
+      if (env && env.PAN_KV && (await qrloginStartOver(env.PAN_KV, request))) {
+        return json({ ok: false, drive, error: '发码太频繁了，请 10 分钟后再试' }, 429);
+      }
       const r = await d.start();
       return json({ ok: true, drive, ...r });
     }
     if (action === 'poll') {
+      if (qrloginPollOver(request)) {
+        return json({ ok: false, drive, error: '轮询太频繁了，请重新生成二维码' }, 429);
+      }
       const params = body.params || Object.fromEntries(url.searchParams.entries());
       const r = await d.poll(params);
       return json({ ok: true, drive, ...r });
     }
     throw new Error('未知操作');
   } catch (e) {
-    return json({ ok: false, drive, error: String((e && e.message) || e) }, 200);
+    // 如实状态码（M6）：不再一律回 200。前端各调用方只读 body 的 ok/error 字段、
+    // 不看 HTTP 状态码，故改码不影响页面；限流 429、参数/不支持类 400、其余（上游/登录失败）502。
+    const msg = String((e && e.message) || e);
+    const status = /频繁/.test(msg) ? 429
+      : /未知操作|暂不支持扫码|请填|缺 |没认出/.test(msg) ? 400
+      : 502;
+    return json({ ok: false, drive, error: msg }, status);
   }
 }

@@ -26,7 +26,8 @@ function json(obj, status = 200) {
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 }
-const fail = (msg, status = 200) => json({ ok: false, error: msg }, status);
+// fail 默认 400（M6）：业务失败不再一律回 200，前端只读 body 的 ok 字段、不看状态码，改码不影响页面。
+const fail = (msg, status = 400) => json({ ok: false, error: msg }, status);
 
 export async function sha256hex(s) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(s)));
@@ -168,9 +169,9 @@ export async function onRequest(context) {
       if (!had && !firstClaimOk) return fail('首次认领需要巡检口令（请求头 x-patrol-key），防止陌生人抢设。部署者可用巡检口令认领，或先开启设置窗口。');
       return fail('设置窗口未开启，且恢复码不正确。可用恢复码重置，或让助理开启 30 分钟设置窗口。');
     }
-    await rlClear(kv, rl0.ip);
     const p = String(body.pass || '');
     if (p.length < 6) return fail('口令至少 6 位');
+    await rlClear(kv, rl0.ip);
     await kv.put('owner_hash', await hashPassV2(p));
     await kv.delete('owner_setup_until');
     if (had) { // 重置口令：清空保险箱凭证，防旧口令泄露连带

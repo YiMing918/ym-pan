@@ -26,6 +26,10 @@ status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Con
 const fail = (error, extra = {}) => typeof extra === 'number' ? json({ ok: false, error }, extra) : json({ ok: false, error, ...extra });
 
 async function fetchText(url, { ua = UA_DESKTOP, headers = {}, method = 'GET', body, redirect = 'follow', timeout = 25000} = {}) {
+// M4 护栏推广：已识别平台的上游域名都是固定公网域名，但短链入口 URL 来自用户输入——
+// 入口先过一遍 isBlockedHost 复检（本机/内网/保留段直接拒），与通用兜底 safeFetchText 同口径。
+// 只查入口不逐跳复检：fetchText 的跟随跳转由 fetch 自动完成、无法逐跳拦截，逐跳复检仍归 safeFetchText。
+try { const hu = new URL(String(url)); if (isBlockedHost(hu.hostname)) throw new Error('这个地址是内网/本机地址，不能解析'); } catch (e) { if (/内网|本机/.test(e.message || '')) throw e; }
 const ctl = new AbortController();
 const t = setTimeout(() => ctl.abort(), timeout);
 try {

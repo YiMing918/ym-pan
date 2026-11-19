@@ -25,7 +25,7 @@ const DRIVES = {
    pan123Bases：123 的两条接口路线，按顺序尝试，第一条通就用第一条。 */
 const CONFIG = {
   lanzouMirrors: ['lanzoui.com', 'lanzoux.com', 'lanzouo.com', 'lanzouq.com', 'lanzoup.com', 'lanzouh.com'],
-  pan123Bases: ['https://www.123pan.cn/b/api', 'https://www.123pan.com/api'],
+  pan123Bases: ['https://yun.123pan.cn/b/api', 'https://www.123865.com/b/api'],
 };
 /* ==== CONFIG:END ==== */
 
@@ -62,10 +62,16 @@ class Jar {
   str() { return [...this.map].map(([k, v]) => `${k}=${v}`).join('; '); }
 }
 
-async function req(url, { method = 'GET', headers = {}, body, jar, redirect = 'follow', ua = UA_PC } = {}) {
+// 带超时的 fetch（H4）：上游挂起时用 AbortController 掐断，避免单个请求拖死整页解析。
+// 口径与 qrlogin.js 的 fetchT 一致（默认 25 秒）；超时抛 AbortError，由各适配器现有报错路径兜底。
+async function fetchT(url, opts = {}, ms = 25000) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: c.signal }); } finally { clearTimeout(t); }
+}
+async function req(url, { method = 'GET', headers = {}, body, jar, redirect = 'follow', ua = UA_PC, timeout = 25000 } = {}) {
   const h = { 'User-Agent': ua, ...headers };
   if (jar) h['Cookie'] = jar.str();
-  const resp = await fetch(url, { method, headers: h, body, redirect });
+  const resp = await fetchT(url, { method, headers: h, body, redirect }, timeout);
   if (jar) jar.absorb(resp);
   return resp;
 }
@@ -186,7 +192,7 @@ const bd = {
     return {
       url: r.data.list[0].dlink, name: file.name,
       headers: { 'User-Agent': 'netdisk;P2SP;2.2.60.26', Cookie: `BDUSS=${(cred.bduss || env.BDUSS || '').trim()}` },
-      note: '百度直链必须带下面的 UA 和你的 BDUSS Cookie 才能下载：复制到 1DM+/ADM 时把请求头一起填上，或用 aria2 命令。链接约 8 小时有效。',
+      note: '百度直链必须带下面的 UA 和 BDUSS Cookie 才能下载：复制到 1DM+/ADM 时把请求头一起填上，或用 aria2 命令。链接约 8 小时有效。注意：若本次用的是部署者在环境变量里配的兜底凭证，出于防泄露，响应里不会下发该 Cookie（请求头区不会显示 Cookie 一项），这类部署的直链请用你自己填的凭证重新解析后再下载。',
     };
   },
 };
@@ -207,6 +213,7 @@ const ali = {
     return h;
   },
   // 有刷新令牌（扫码登录存的）时，先换一张新鲜的访问令牌再干活，并回写新令牌
+  // （body 里的 client_id '25dzX3vbYqktVxyX' 是阿里公开协议常量、非秘密）
   async auth(cred) {
     if (!cred.aliRefresh) return { cred, upd: null };
     try {
@@ -368,7 +375,7 @@ function quarkFamily(host, pr, label) {
       return {
         url, name: file.name,
         headers: { Cookie: jar.str(), 'User-Agent': DL_UA },
-        note: `${label}直链要带你的 Cookie 和客户端 UA 才能下载（下方「链接+请求头」已配好，整段复制到下载器）。转存过的文件会留在你自己网盘根目录，可自行删除。`,
+        note: `${label}直链要带 Cookie 和客户端 UA 才能下载。若本次用的是你自己填的凭证，下方「链接+请求头」已配好、可整段复制到下载器；若用的是部署者环境变量兜底凭证，出于防泄露，响应里不会下发该 Cookie，这类直链无法直接交给下载器使用，请改用你自己填的凭证重新解析。转存过的文件会留在你自己网盘根目录，可自行删除。`,
         credUpdate: { cookie: jar.str() },
       };
     },
@@ -408,7 +415,8 @@ const lz = {
   async list(url) {
     const { code, hosts } = lz.hosts(url);
     let lastErr = null;
-    for (const host of hosts.slice(0, 5)) {
+    // 尝试上限 9（L2）：hosts() 生成首选+镜像子域+ww. 变体共十余个，只试 5 个时 ww. 变体永远轮不到；放宽到 9 让前几家的 ww. 变体也有机会，失败路径最多多试 4 家。
+    for (const host of hosts.slice(0, 9)) {
       try {
         const pageUrl = `https://${host}/${code}`;
         const r1 = await req(pageUrl, { headers: { Referer: `https://${host}/` } });
@@ -522,6 +530,7 @@ function md5(input) {
   const hex = n => [0, 8, 16, 24].map(s => ((n >>> s) & 0xff).toString(16).padStart(2, '0')).join('');
   return hex(a0) + hex(b0) + hex(c0) + hex(d0);
 }
+// 公开协议常量、非秘密：移动云盘分享网关的固定 AES 密钥，来自公开客户端协议，硬编码是协议要求，不是本站凭证。
 const CMCC_AES_KEY = new TextEncoder().encode('PVGDwmcvfs1uV3d1');
 const b64FromBytes = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 8192) s += String.fromCharCode(...bytes.subarray(i, i + 8192)); return btoa(s); };
 const bytesFromB64 = b64 => Uint8Array.from(atob(String(b64).replace(/\s/g, '')), c => c.charCodeAt(0));
@@ -580,7 +589,7 @@ const cmcc = {
     // 网关偶发空回（2026-11-11 回归测试撞到一次、重试即好）：解不出数据时隔 800ms 重试一次，与小飞机三轮重试同理
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt) await new Promise(r => setTimeout(r, 800));
-      const res = await fetch(`https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/${path}`, {
+      const res = await fetchT(`https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/${path}`, {
         method: 'POST', headers, body,
       });
       const rawText = await res.text();
@@ -643,7 +652,7 @@ const cmcc = {
       if (ca.length + co.length < 200) break;
       if (page === 19) truncated = true;
     }
-    return { ctx: { linkId, passwd }, files, path: '/', route: '分享网关·加密口径', title, ...(truncated ? { truncated: true } : {}) };
+    return { ctx: { linkId, passwd, dir: pCaID }, files, path: pCaID === 'root' ? '/' : pCaID, route: '分享网关·加密口径', title, ...(truncated ? { truncated: true } : {}) };
   },
   async download(cred, env, ctx, file) {
     const account = cmcc.account(cred);
@@ -665,6 +674,7 @@ const cmcc = {
 /* 天翼口径 2026-11-10 按现行实现重写（油猴 555404 源码实证）：
    getShareInfoByCodeV2 须带签名头四件套（Signature=MD5(参数+Timestamp+AppKey 字典序 k=v 拼接)）；
    列目录走 listShareDir（不签名，靠 Referer + 分享 Cookie）；响应大整数 id 先包字符串防精度丢失。 */
+// 公开协议常量、非秘密：天翼云盘开放接口的公开 AppKey，来自公开客户端协议，不是本站凭证。
 const CT_APPKEY = '600100422';
 function ctSign(params) {
   const s = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
@@ -692,6 +702,7 @@ const ctyun = {
     let shareMode = (ctx && ctx.shareMode) || '0';
     let rootId = (ctx && ctx.rootId) || '';
     let shareFileName = '';
+    let infoIsFolder = false;
     if (!ctx || !ctx.dir) {
       if (accessCode) {
         try {
@@ -721,7 +732,7 @@ const ctyun = {
       shareMode = String(info.shareMode || '0');
       rootId = String(info.fileId || '');
       shareFileName = info.fileName || '';
-      var infoIsFolder = info.isFolder;
+      infoIsFolder = info.isFolder;
     }
     const dirId = (ctx && ctx.dir) || rootId;
     const files = [];
@@ -760,14 +771,14 @@ const ctyun = {
     if (!files.length && shareFileName && rootId && !infoIsFolder) {
       files.push({ id: String(rootId), name: shareFileName, size: 0, dir: false });
     }
-    return { ctx: { code, accessCode, shareId, shareMode, rootId }, files, path: '/', route: '签名口径', ...(truncated ? { truncated: true } : {}) };
+    return { ctx: { code, accessCode, shareId, shareMode, rootId, dir: String(dirId) }, files, path: String(dirId) === String(rootId) ? '/' : String(dirId), route: '签名口径', ...(truncated ? { truncated: true } : {}) };
   },
   async download(cred, env, ctx, file) {
     const jar = new Jar(cred.ctCookie || '');
     const r = await reqJson(`https://cloud.189.cn/api/open/file/getFileDownloadUrl.action?noCache=${Math.random()}&fileId=${file.id}`, { jar, headers: { Referer: 'https://cloud.189.cn/web/main/' } });
     const url = r.data && (r.data.fileDownloadUrl || (r.data.data && r.data.data.fileDownloadUrl));
     if (!url) throw new Error(fmtErr('天翼取链失败', r.data) + '（天翼下载多半要求登录态：请在凭证里填天翼 Cookie 后重试）');
-    return { url, name: file.name, headers: { Cookie: cred.ctCookie || '' }, note: '天翼直链有时效，且可能校验 Cookie。' };
+    return { url, name: file.name, headers: { Cookie: cred.ctCookie || '' }, note: '天翼直链有时效，且可能校验 Cookie。若本次 Cookie 来自部署者环境变量兜底，出于防泄露响应里不会下发 Cookie，直链可能无法直接下载，请改用你自己填的 Cookie 重新解析。' };
   },
 };
 
@@ -792,6 +803,7 @@ async function fjAesEcbBytes(keyStr, plainBytes) {
   }
   return out;
 }
+// 公开协议常量、非秘密：小飞机 'dingHao-disk-app' 是其公开客户端协议的固定 AES 密钥，不是本站凭证。
 const fjAesHex = async plain => [...(await fjAesEcbBytes('dingHao-disk-app', new TextEncoder().encode(plain)))].map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
 function fjUuid() {
   const chars = [];
@@ -851,7 +863,7 @@ const feijipan = {
             else if (item.fileId || item.fileName) pushF(item);
           }
           if (!files.length) { sawOkEmpty = true; throw new Error('__EMPTY__'); }
-          return { ctx: { key, userId, uuid }, files, path: '/', route: '推荐接口' };
+          return { ctx: { key, userId, uuid, dir: (ctx && ctx.dir) || 0 }, files, path: '/', route: '推荐接口' };
         } catch (e) { if (e.message !== '__EMPTY__') firstErr = e; }
       }
       if (sawOkEmpty && !firstErr) throw new Error(pwd ? '小飞机分享里没找到文件（提取码可能不对，或分享已失效）' : '小飞机分享里没找到文件（可能需要提取码，或分享已失效）');
@@ -864,11 +876,13 @@ const feijipan = {
     const d = r.data;
     const list = d && (d.data && (d.data.list || d.data.files) || d.list);
     if (!list) throw new Error(fmtErr('小飞机列目录失败', d) + (firstErr ? `；主路线也失败：${firstErr.message}` : ''));
+    const folderId = (ctx && ctx.dir) || 0;
     const files = list.map(f => ({
       id: String(f.fileId || f.id), name: f.fileName || f.name,
       size: f.fileSize || f.size || 0, dir: f.fileType === 'folder' || f.isFolder === true || f.type === 1,
+      userId: f.userId || f.uid ? String(f.userId || f.uid) : '',
     }));
-    return { ctx: { key }, files, path: '/', route: '旧接口兜底' };
+    return { ctx: { key, userId: (ctx && ctx.userId) || '', uuid: (ctx && ctx.uuid) || '', dir: folderId }, files, path: folderId ? String(folderId) : '/', route: '旧接口兜底' };
   },
   async download(cred, env, ctx, file) {
     // 现行签名流：downloadId=AES(fileId|userId)、auth=AES(fileId|时间戳)
@@ -952,14 +966,14 @@ const pan123 = {
     if (!m) throw new Error('没认出 123 分享链接');
     return m[1];
   },
-  async tryList(host, key, pwd, parentId) {
+  async tryList(base, key, pwd, parentId) {
     const all = [];
     let truncated = false;
     // 分页硬顶 20 页（C-36，原 50）：满页跑满硬顶标 truncated（挂在数组上由 list() 转成响应字段）
     for (let page = 1; page <= 20; page++) {
       const params = new URLSearchParams({ limit: '100', next: '0', orderBy: 'file_name', orderDirection: 'asc', shareKey: key, ParentFileId: String(parentId || 0), Page: String(page) });
       if (pwd) params.set('SharePwd', pwd);
-      const r = await reqJson(`https://${host}/b/api/share/get?${params}`, { headers: { 'User-Agent': 'Dart/3.12 (dart:io)' } });
+      const r = await reqJson(`${base}/share/get?${params}`, { headers: { 'User-Agent': 'Dart/3.12 (dart:io)' } });
       if (!r.data || r.data.code !== 0 || !r.data.data) throw new Error(fmtErr('123 列目录失败', r.data, { '5112': '该分享受限（5112）' }));
       const list = r.data.data.InfoList || [];
       all.push(...list);
@@ -972,12 +986,14 @@ const pan123 = {
   async list(url, pwd, cred, env, ctx) {
     const key = (ctx && ctx.key) || pan123.key(url);
     const parentId = (ctx && ctx.dir) || '0';
-    let items, route;
-    try { items = await pan123.tryList('yun.123pan.cn', key, pwd, parentId); route = '现行匿名接口'; }
-    catch (e1) {
-      try { items = await pan123.tryList('www.123865.com', key, pwd, parentId); route = '现行匿名接口（备域名）'; }
-      catch (e2) { throw new Error(`${e1.message}；备用路线也失败：${e2.message}`); }
+    // 按 CONFIG.pan123Bases 顺序逐条尝试（看门狗维护该数组的顺序/存废即真实生效，与蓝奏 lanzouMirrors 同口径）
+    let items = null, route = '', lastErr = null;
+    const bases = (CONFIG.pan123Bases && CONFIG.pan123Bases.length) ? CONFIG.pan123Bases : ['https://yun.123pan.cn/b/api'];
+    for (let i = 0; i < bases.length; i++) {
+      try { items = await pan123.tryList(bases[i], key, pwd, parentId); route = i === 0 ? '现行匿名接口' : '现行匿名接口（备域名）'; lastErr = null; break; }
+      catch (e) { lastErr = e; }
     }
+    if (!items) throw new Error(lastErr ? `${lastErr.message}；全部 123 路线均失败` : '123 列目录失败');
     const files = items.map(f => ({
       id: String(f.FileId), name: f.FileName, size: f.Size || 0,
       dir: f.Type === 1 || f.Type === '1', etag: f.Etag || '', s3: f.S3KeyFlag || '',
@@ -1016,7 +1032,7 @@ const pan123 = {
     for (let hop = 0; hop < 5; hop++) {
       let resp;
       try {
-        resp = await fetch(cur, { redirect: 'manual', headers: { 'User-Agent': 'Dart/3.12 (dart:io)', Referer: 'https://yun.123pan.cn/', Range: 'bytes=0-0' } });
+        resp = await fetchT(cur, { redirect: 'manual', headers: { 'User-Agent': 'Dart/3.12 (dart:io)', Referer: 'https://yun.123pan.cn/', Range: 'bytes=0-0' } }, 15000);
       } catch { break; }
       const loc = resp.headers.get('location');
       if (resp.status >= 300 && resp.status < 400 && loc) {
@@ -1075,6 +1091,7 @@ const pan123 = {
 /* ================= 迅雷云盘（实验） =================
    分享口径（panweb-parser 逆向笔记）：api-pan.xunlei.com/drive/v1/share，
    每类请求都要 x-captcha-token —— 先调 xluser-ssl 的 captcha/init 换取（低风险时直发）。 */
+// 公开协议常量、非秘密：迅雷公开客户端 ID，来自公开客户端协议，不是本站凭证。
 const XL_CLIENT_ID = 'XQPcCPdgZmIQB9Vw';
 /* 迅雷 captcha 口径 2026-11-10 按现行实现重写（OpenList 驱动源码 + panweb-parser 实测）：
    老实现用假 sign（'1.'+时间戳）+ 每次随机新设备从机房出口请求，等于最差信誉组合，永远拿不到令牌。
@@ -1082,6 +1099,7 @@ const XL_CLIENT_ID = 'XQPcCPdgZmIQB9Vw';
    ② 保险箱存了抓包三件套（xlCaptchaSign/xlCaptchaTs/xlUserId）时用存的 sign 换新令牌（sign 无时效校验）；
    ③ 上游回验证页 url 时把链接原样透传给用户，让他在自己浏览器里完成验证。 */
 const XL_ANDROID = {
+  // 公开协议常量、非秘密：clientId 为迅雷安卓客户端公开 ID，不是本站凭证。
   clientId: 'Xp6vsxz_7IYVw2BB', version: '8.31.0.9726', pkg: 'com.xunlei.downloadprovider',
   salts: ['9uJNVj/wLmdwKrJaVj/omlQ', 'Oz64Lp0GigmChHMf/6TNfxx7O9PyopcczMsnf', 'Eb+L7Ce+Ej48u', 'jKY0', 'ASr0zCl6v8W4aidjPK5KHd1Lq3t+vBFf41dqv5+fnOd', 'wQlozdg6r1qxh0eRmt3QgNXOvSZO6q/GXK', 'gmirk+ciAvIgA/cxUUCema47jr/YToixTT+Q6O', '5IiCoM9B1/788ntB', 'P07JH0h6qoM6TSUAK2aL9T5s2QBVeY9JWvalf', '+oK0AN'],
   ua: 'ANDROID-com.xunlei.downloadprovider/8.31.0.9726 netWorkType/5G appid/40 deviceName/Xiaomi_M2004j7ac deviceModel/M2004J7AC OSVersion/12 protocolVersion/301 platformVersion/10 sdkVersion/512000 Oauth2Client/0.9 (Linux 4_14_186-perf-gddfs8vbb238b) (JAVA 0)',
@@ -1283,6 +1301,7 @@ const xunlei = {
    分享：get_share_access_token（匿名+提取码）→ get_share_page_files_list → get_share_download_url。
    扫码登录（设备码流）存的访问/刷新令牌用于取链兜底与自动续期（口径对照 JxPan）。 */
 const GY_API = 'https://api.guangyapan.com';
+// 公开协议常量、非秘密：光鸭公开客户端 ID，来自公开客户端协议，不是本站凭证。
 const GY_CLIENT = 'aMe-8VSlkrbQXpUR';
 const gy = {
   id(url) {
@@ -1372,13 +1391,11 @@ const ADAPTERS = {
   },
   quark: {
     credKeys: ['cookie'],
-    credEnv: 'QUARK_COOKIE',
     list: (b, env) => quark.list(b.url, b.pwd, { cookie: b.cred.quarkCookie }, env, b.ctx),
     download: (b, env) => quark.download({ cookie: b.cred.quarkCookie }, env, b.ctx, b.file),
   },
   uc: {
     credKeys: ['cookie'],
-    credEnv: 'UC_COOKIE',
     list: (b, env) => uc.list(b.url, b.pwd, { cookie: b.cred.ucCookie }, env, b.ctx),
     download: (b, env) => uc.download({ cookie: b.cred.ucCookie }, env, b.ctx, b.file),
   },
@@ -1432,6 +1449,23 @@ function envCreds(env) {
   };
 }
 
+// health 限流（L4）：未鉴权端点每次扇出 11 次上游请求，按 IP 在 KV 里限流（10 分钟 20 次），
+// 与 parseRlOver 同口径：超限直接拒、绝不写 KV；KV 未绑定时不拦，零配置部署不受影响。
+const HEALTH_RL_MAX = 20;
+const HEALTH_RL_WIN = 10 * 60 * 1000;
+async function healthRlOver(kv, request) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const key = 'rl:health:' + ip;
+  let r = { n: 0, winStart: 0 };
+  try { r = JSON.parse((await kv.get(key)) || '') || r; } catch {}
+  const now = Date.now();
+  if (!r.winStart || now - r.winStart > HEALTH_RL_WIN) { r.n = 0; r.winStart = now; }
+  if (r.n >= HEALTH_RL_MAX) return true;
+  r.n++;
+  try { await kv.put(key, JSON.stringify(r), { expirationTtl: 24 * 3600 }); } catch {}
+  return false;
+}
+
 async function health(env) {
   const probes = [
     ['百度网盘', 'https://pan.baidu.com/'],
@@ -1448,7 +1482,7 @@ async function health(env) {
   ];
   const results = await Promise.all(probes.map(async ([name, u]) => {
     try {
-      const r = await fetch(u, { method: 'GET', headers: { 'User-Agent': UA_PC }, redirect: 'manual' });
+      const r = await fetchT(u, { method: 'GET', headers: { 'User-Agent': UA_PC }, redirect: 'manual' }, 10000);
       return { name, reachable: r.status < 500, status: r.status };
     } catch (e) { return { name, reachable: false, status: 0 }; }
   }));
@@ -1477,8 +1511,11 @@ export async function onRequest(context) {
   const { request, env } = context;
   if (request.method === 'GET') {
     const u = new URL(request.url);
-    if (u.searchParams.get('action') === 'health') return health(env);
-    return ok({ service: 'ym-pan parse api', version: '1.9.7', drives: DRIVES });
+    if (u.searchParams.get('action') === 'health') {
+      if (env && env.PAN_KV && (await healthRlOver(env.PAN_KV, request))) return fail('自检太频繁了，请 10 分钟后再试', 429);
+      return health(env);
+    }
+    return ok({ service: 'ym-pan parse api', version: '1.9.8', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
