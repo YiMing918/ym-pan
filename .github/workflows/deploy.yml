@@ -23,6 +23,8 @@ jobs:
           node-version: 20
       - name: 冒烟测试（不过不许部署）
         run: node tests/smoke.mjs
+      - name: 安全定向测试（不过不许部署）
+        run: node tests/security-c.mjs
       - name: 推送部署到 Cloudflare Pages（仅当配了部署令牌）
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
         run: |
