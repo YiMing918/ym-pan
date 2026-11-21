@@ -4,6 +4,8 @@ name: deploy
 # 需在仓库 Settings → Secrets 添加 CLOUDFLARE_API_TOKEN 与 CLOUDFLARE_ACCOUNT_ID；
 # 没配令牌时部署步自动跳过（Fork 用户可改用 Pages 连 Git 的方式部署，不受影响）。
 # v1.9.2 起：部署前先跑冒烟测试（tests/smoke.mjs），不过不许部署。
+# 工具版本走锁文件：package.json / package-lock.json 锁定 wrangler 3.x，流水线 npm ci
+# 装本地锁定版，不再每次现拉最新版（半夜工具自升版把部署顶坏的根治法，同 ym-mail 样板）。
 on:
   push:
     branches: [main]
@@ -20,7 +22,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
+      - name: 按锁文件装工具（wrangler 锁定版）
+        run: npm ci --no-audit --no-fund
       - name: 冒烟测试（不过不许部署）
         run: node tests/smoke.mjs
       - name: 安全定向测试（不过不许部署）
@@ -31,4 +35,4 @@ jobs:
           mkdir -p dist/functions
           cp index.html _headers dist/
           cp -r functions/. dist/functions/
-          npx -y wrangler@3 pages deploy dist --project-name ym-pan --branch main --commit-dirty=true
+          npx -y wrangler pages deploy dist --project-name ym-pan --branch main --commit-dirty=true
