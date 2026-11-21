@@ -1,0 +1,67 @@
+name: auto-upgrade
+
+# 每周试升级：周一早上 06:20（北京时间）自己醒一次，把 wrangler 等依赖在锁文件
+# 范围内升到最新 → 装好 → 跑全部测试 → 按正式部署同款方式组装 dist 并验工具链。
+# 全过才提交并触发一次真部署；有一样不过，全部退回、什么都不提交，红灯即报警。
+# 本周没东西可升时只留一个心跳提交（防 GitHub 60 天无动静停掉定时任务）。
+# 与 ym-mail（05:20）、ym-blog（05:50）错开半小时，避免几仓同时抢跑。
+on:
+  schedule:
+    - cron: '20 22 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-upgrade-ym-pan
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 试升级依赖（锁文件范围内）
+        run: |
+          npm update --no-audit --no-fund
+          npm ci --no-audit --no-fund
+      - name: 跑仓库全部测试（不过不提交）
+        run: |
+          node tests/smoke.mjs
+          node tests/security-c.mjs
+      - name: 组装 dist 并验工具链（Pages 没有干跑命令，验 wrangler 能跑、令牌能连）
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::error::未配置 CLOUDFLARE_API_TOKEN（仓库 Secrets），终止"; exit 1; fi
+          mkdir -p dist/functions
+          cp index.html _headers dist/
+          cp -r functions/. dist/functions/
+          test -f dist/index.html && test -d dist/functions/api
+          npx -y wrangler pages project list
+      - name: 有升级就提交并触发部署，没升级就留心跳
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(TZ=Asia/Shanghai date +%F)
+          echo "last auto-upgrade run: $DATE" > .github/auto-upgrade-heartbeat.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- package.json package-lock.json; then
+            git add .github/auto-upgrade-heartbeat.txt
+            git commit -m "chore: 每周试升级心跳 $DATE [skip ci]"
+            git push
+            echo "本周没有可升级的依赖，已留心跳。"
+          else
+            git add package.json package-lock.json .github/auto-upgrade-heartbeat.txt
+            git commit -m "auto-upgrade: 依赖周更 $DATE（测试全过）"
+            git push
+            gh workflow run deploy.yml --ref main
+            echo "已提交升级并触发正式部署。"
+          fi
