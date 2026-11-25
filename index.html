@@ -548,7 +548,7 @@ $('#btnBatch').onclick=async()=>{
   for(const f of files){
     try{
       const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:state.ctx, file:f });
-      if(res.ok){ state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>${res.url}</div>`; }
+      if(res.ok){ state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>${esc(res.url)}</div>`; }
       else html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>失败：${esc(res.error||'')}</div>`;
     }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${esc(f.name)}<br>失败：${esc(e.message)}</div>`; }
     box.innerHTML=html;
@@ -606,7 +606,7 @@ $('#btnRecursive').onclick=async()=>{
   for(const it of found){
     try{
       const res=await api({ drive:state.drive, action:'download', cred:loadCreds(), ctx:it.ctx, file:it.file });
-      if(res.ok){ res._label=it.label; state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>${res.url}</div>`; }
+      if(res.ok){ res._label=it.label; state.batch.push(res); html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>${esc(res.url)}</div>`; }
       else html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>失败：${esc(res.error||'')}</div>`;
     }catch(e){ html+=`<div class="linkbox" style="margin-top:6px">${esc(it.label)}<br>失败：${esc(e.message)}</div>`; }
     box.innerHTML=head+html;
