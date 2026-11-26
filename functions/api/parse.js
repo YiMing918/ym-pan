@@ -1529,7 +1529,7 @@ export async function onRequest(context) {
       if (env && env.PAN_KV && (await healthRlOver(env.PAN_KV, request))) return fail('自检太频繁了，请 10 分钟后再试', 429);
       return health(env);
     }
-    return ok({ service: 'ym-pan parse api', version: '1.9.9', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.10', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
