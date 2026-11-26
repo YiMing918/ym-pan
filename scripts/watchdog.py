@@ -7,6 +7,7 @@
 """
 import datetime
 import json
+import time
 import os
 import re
 import subprocess
@@ -367,12 +368,54 @@ def heartbeat():
     return True
 
 
+def _problem_keys(p):
+    # 把一条异常拆成可跨轮对账的键：接口不通按网盘逐个拆，其余取「类别 + 对象」。
+    m = re.match(r'接口不通：(.+)', p)
+    if m:
+        return ['接口不通：' + x.strip() for x in re.split(r'[、,，]', m.group(1)) if x.strip()]
+    m = re.match(r'(结构探针|扫码登录探针|视频探针|直链可用性)\s+(\S+)', p)
+    if m:
+        return [m.group(1) + ' ' + m.group(2)]
+    return [p.split('：')[0]]
+
+
+def _confirm_problems(first):
+    # 复查确认（2026-11-26 加）：首轮有异常时隔 90 秒整轮复查一遍，只保留
+    # 两轮都出现的异常。国内网盘接口经海外节点访问，超时/抖动是常事，
+    # 一轮定罪会天天红、天天发失败邮件，真故障反而被淹没；真故障
+    # （如小飞机把假分享当真）每轮必现，复查不会放过。只在一轮出现的
+    # 异常降为备注留痕，不静默吞掉。
+    time.sleep(90)
+    first_keys = set()
+    for p in first:
+        first_keys.update(_problem_keys(p))
+    problems.clear()
+    probe_site()
+    probe_structure()
+    probe_qrlogin()
+    probe_video()
+    probe_usability()
+    kept = []
+    for p in list(problems):
+        if p.startswith('接口不通：'):
+            stay = [k.split('：', 1)[1] for k in _problem_keys(p) if k in first_keys]
+            if stay:
+                kept.append('接口不通：' + '、'.join(stay))
+        elif any(k in first_keys for k in _problem_keys(p)):
+            kept.append(p)
+    problems[:] = kept
+    notes.append(f'复查确认：首轮异常 {len(first)} 条，复查后仍复现 {len(kept)} 条；'
+                 f'未复现的按偶发抖动处理。首轮明细：' + '；'.join(first)[:400])
+
+
 def main():
     probe_site()
     probe_structure()
     probe_qrlogin()
     probe_video()
     probe_usability()
+    if problems:
+        _confirm_problems(list(problems))
     mechanical_fixes()
     if fixes:
         commit_and_deploy()
