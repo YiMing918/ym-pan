@@ -836,6 +836,7 @@ const feijipan = {
       // 路线 A：recommend/list（现行分享页口径）
       // 上游对部分服务器出口 IP 会回空名单/拒答，换 uuid 重试可换出口、多试几次成功率明显高（2026-11-10 真测观察）
       let sawOkEmpty = false;
+      let sawForeign = false;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           if (attempt) await new Promise(r => setTimeout(r, 1200));
@@ -846,6 +847,18 @@ const feijipan = {
           const r = await reqJson(u, { method: 'POST', headers: { Referer: 'https://share.feijipan.com/' } });
           const d = r.data;
           if (!(d && d.code === 200 && Array.isArray(d.list))) throw new Error(fmtErr('小飞机列目录失败', d));
+          // 上游 recommend/list 名为推荐接口：分享不存在时它不报错，而是塞回
+          // 别人的热门分享（2026-11-19 起实测）。只认领 shareUrl 尾巴或 shareId
+          // 与本次 key 对得上的记录；一条都对不上 = 分享不存在，绝不把推荐
+          // 内容冒充成这个分享的文件（看门狗 2026-11-19 起连红 7 天就是它）。
+          // 若整批记录都没有 shareUrl（上游改了结构），退回旧行为全收，免得误杀真分享。
+          const anySlug = d.list.some(it => it && it.shareUrl && /\/s\/[A-Za-z0-9_-]+/.test(String(it.shareUrl)));
+          const mine = anySlug ? d.list.filter(it => {
+            if (!it) return false;
+            const slug = it.shareUrl && String(it.shareUrl).match(/\/s\/([A-Za-z0-9_-]+)/);
+            return (slug && slug[1] === key) || String(it.shareId) === String(key);
+          }) : d.list;
+          if (!mine.length) { if (d.list.length) sawForeign = true; else sawOkEmpty = true; throw new Error('__EMPTY__'); }
           const files = [];
           let userId = d.userId ? String(d.userId) : '';
           const pushF = f => {
@@ -857,7 +870,7 @@ const feijipan = {
               userId: fu ? String(fu) : '',
             });
           };
-          for (const item of d.list) {
+          for (const item of mine) {
             if (item.userId && !userId) userId = String(item.userId);
             if (Array.isArray(item.fileList) && item.fileList.length) item.fileList.forEach(pushF);
             else if (item.fileId || item.fileName) pushF(item);
@@ -866,6 +879,7 @@ const feijipan = {
           return { ctx: { key, userId, uuid, dir: (ctx && ctx.dir) || 0 }, files, path: '/', route: '推荐接口' };
         } catch (e) { if (e.message !== '__EMPTY__') firstErr = e; }
       }
+      if (sawForeign && !firstErr) throw new Error('小飞机列目录失败：分享不存在或已失效');
       if (sawOkEmpty && !firstErr) throw new Error(pwd ? '小飞机分享里没找到文件（提取码可能不对，或分享已失效）' : '小飞机分享里没找到文件（可能需要提取码，或分享已失效）');
     }
     // 路线 B：旧 share/list 兜底（文件夹导航只剩这条；上游恢复即生效）
@@ -1515,7 +1529,7 @@ export async function onRequest(context) {
       if (env && env.PAN_KV && (await healthRlOver(env.PAN_KV, request))) return fail('自检太频繁了，请 10 分钟后再试', 429);
       return health(env);
     }
-    return ok({ service: 'ym-pan parse api', version: '1.9.8', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.9', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
