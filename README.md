@@ -2,7 +2,7 @@
 
 把网盘分享链接解析成**真实直链**，交给 1DM+、ADM、aria2 等下载器下载；另带短视频去水印解析。部署在 Cloudflare Pages + Functions，免费额度内运行，**跟着本文一步一步做就能部署出你自己的一个站**。
 
-![Version](https://img.shields.io/badge/版本-v1.9.9-blue) ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020) ![License](https://img.shields.io/badge/license-MIT-green) ![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue) ![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4) ![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
+![Version](https://img.shields.io/badge/版本-v1.9.10-blue) ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020) ![License](https://img.shields.io/badge/license-MIT-green) ![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue) ![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4) ![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
 
 **[下载最新版](https://github.com/YiMing918/ym-pan/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-pan-guide)**
 
@@ -873,6 +873,7 @@ README.md                   你正在看的这份
 
 ## 版本历史
 
+- **v1.9.10（2026-11-26）**：看门狗加复查确认。v1.9.9 修掉小飞机后，看门狗仍会红——剩下的是国内网盘接口经海外节点访问的超时抖动（接口不通名单几乎每天换人、迅雷探针偶发超时），一轮定罪等于天天发失败邮件、真故障被淹没。现首轮有异常时隔 90 秒整轮复查，只保留两轮都复现的异常，只出现一轮的降为备注留痕（首轮明细一并写入报告，不静默吞掉）；真故障每轮必现，不会被复查放过。
 - **v1.9.9（2026-11-26）**：小飞机假分享冒充修复。上游 recommend/list 在分享不存在时不报错、改塞别人的热门分享回来，看门狗自 2026-11-19 起连红 7 天，访客粘一条失效的小飞机链接也会看到陌生文件冒充分享内容。现路线 A 只认领 shareUrl 尾巴或 shareId 与本次链接对得上的记录，一条都对不上就按「小飞机列目录失败：分享不存在或已失效」报错（与看门狗探针口径对齐）；整批记录都没有 shareUrl（上游改结构）时退回全收，免得误杀真分享。空回、提取码与子目录口径不变。
 - **v1.9.8（2026-11-19）**：安全修复批（外部审查逐条核实后修复）。**子目录会话口径统一**：移动/天翼/小飞机三家列目录返回的会话（ctx）此前不带当前目录、路径恒为根，拿返回会话直接重列的调用方会回到根目录，小飞机子目录还连带丢 userId/uuid 影响取链；现三家都回传真实 dir 与 path，小飞机兜底路线保留 userId/uuid，与百度/阿里/夸克/123 同口径。**123 自愈真正生效**：列目录此前写死两个域名、顶部 CONFIG 区的 `pan123Bases` 从没被用过，看门狗调整它纯属空操作；现列目录按 `pan123Bases` 顺序逐条尝试（值已对齐现行端点 yun.123pan.cn 与 123865），看门狗的主备交换从此真能生效。**扫码登录补限流**：访客扫码的发码按 IP 加 KV 限流（10 分钟 30 次，与巡检发码同口径），轮询加宽松上限（进程内计数、不烧 KV 写额度）；扫码接口出错不再一律回 200，改为如实状态码（限流 429 / 参数类 400 / 上游失败 502，前端只读响应体不受影响）。**上游请求统一加超时**：解析层请求封装、移动网关、123 跟跳、巡检与巡检扫码的直连请求全部套 25 秒（个别 10~15 秒）超时，上游挂起不再拖死整页；健康自检每家 10 秒超时且端点加了按 IP 限流。**补齐基础安全头**：`_headers` 与直传包合成入口两处同步加 HSTS、防嵌套（X-Frame-Options + frame-ancestors）、Permissions-Policy 与一条克制的 CSP（只放行同源脚本样式与各平台 CDN 的图片/视频，不影响页面与播放）。**文档与代码对齐**：百度/夸克/UC/天翼的结果说明与本节「环境变量兜底」写清——用部署者环境变量凭证解析时，响应不下发 Cookie（防泄露口径不变），这类直链需改用自己填的凭证重新解析才能交给下载器；环境变量清单补上漏写的 `XUNLEI_REFRESH`，删掉解析层两处没人用的死字段。**其余小修**：保险箱设口令改为先校验长度再清限流计数、失败响应默认状态码改为 400；视频解析的入口链接加内网地址复检；蓝奏域名尝试上限由 5 放宽到 9（ww. 变体此前永远轮不到）；天翼子目录的一个未定义变量隐患修掉；各家公开协议常量（客户端 ID/AppKey/固定密钥）统一标注「公开协议常量、非秘密」；看门狗巡检发现异常时退出码改为非零（此前问题再多工作流也显绿）、蓝奏镜像保留逻辑改可读写法、123 探针路径对齐现行端点。
 - **v1.9.7（2026-11-18）**：新增**直传专用包** `ym-pan-worker-deploy-日期.zip`：把 `functions/` 的 6 个接口合成单个 `_worker.js`（合成入口 `build/worker-entry.js`，原函数源码一字未改），方法四（CF 后台直接上传）改用这个包。原因说清：CF 控制台拖拽上传**不会编译 `functions/` 文件夹**（官方文档明示），普通部署包直传必然是页面能开、全部功能坏死，不是偶发、重试也没用；旧版说明书把这个失败归因于「用户漏传文件」是错的，本版一并改对。合成包与原 functions 版做过本地逐条对照（32 条用例全一致），冒烟 29/29、定向测试 34/34 不回归。原部署包与方法一/二/三不变。
