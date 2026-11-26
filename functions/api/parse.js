@@ -1495,10 +1495,19 @@ async function health(env) {
     ['光鸭云盘', 'https://www.guangyapan.com/'],
   ];
   const results = await Promise.all(probes.map(async ([name, u]) => {
-    try {
-      const r = await fetchT(u, { method: 'GET', headers: { 'User-Agent': UA_PC }, redirect: 'manual' }, 10000);
-      return { name, reachable: r.status < 500, status: r.status };
-    } catch (e) { return { name, reachable: false, status: 0 }; }
+    // 单次探测从 CF 边缘连国内接口偶有抖动（2026-11-26 实测：同一接口
+    // 连查三次，小飞机/天翼轮流误报不通，但解析本身一直正常）。失败隔
+    // 1.5 秒重试一次，两次都失败才报不通；真宕机两次必现，不会被放过。
+    let last = { name, reachable: false, status: 0 };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt) await new Promise(r => setTimeout(r, 1500));
+      try {
+        const r = await fetchT(u, { method: 'GET', headers: { 'User-Agent': UA_PC }, redirect: 'manual' }, 10000);
+        last = { name, reachable: r.status < 500, status: r.status };
+        if (last.reachable) break;
+      } catch (e) { last = { name, reachable: false, status: 0 }; }
+    }
+    return last;
   }));
   return ok({ health: results, at: new Date().toISOString() });
 }
@@ -1529,7 +1538,7 @@ export async function onRequest(context) {
       if (env && env.PAN_KV && (await healthRlOver(env.PAN_KV, request))) return fail('自检太频繁了，请 10 分钟后再试', 429);
       return health(env);
     }
-    return ok({ service: 'ym-pan parse api', version: '1.9.10', drives: DRIVES });
+    return ok({ service: 'ym-pan parse api', version: '1.9.11', drives: DRIVES });
   }
   if (request.method !== 'POST') return fail('只支持 POST', 405);
   let body;
