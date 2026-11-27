@@ -90,9 +90,11 @@ function fmtErr(prefix, data, map = {}) {
 }
 
 /* ================= 百度网盘 =================
-   流程（对照 baiduwp / LinkSwift 口径）：GET 分享页拿 PANPSC 与 sign/timestamp/uk/shareid
-   → POST share/verify 验提取码得 randsk(BDCLND) → share/list 列目录
-   → POST api/sharedownload 取 dlink。只需 BDUSS；STOKEN 非必需。 */
+   流程（2026-11 百度改版后口径，issue #3）：GET 分享页 → POST share/verify 验提取码
+   得 randsk(BDCLND) → 重取分享页拿 share_uk/bdstoken → share/list 新口径
+   （shorturl + bdstoken + root/dir）列目录。只需 BDUSS；STOKEN 非必需。
+   取直链仍走 api/sharedownload 老参数：百度已把该接口的响应改成加密串，
+   且新参数 jsToken / path_list 前缀的来源未定位，暂未恢复，见 issue #3。 */
 const bd = {
   cred(cred, env) {
     const bduss = (cred.bduss || env.BDUSS || '').trim();
@@ -109,17 +111,19 @@ const bd = {
   async open(url, pwd, cred, env) {
     const surl = bd.surl(url);
     const jar = bd.cred(cred, env);
-    const page = await req(`https://pan.baidu.com/s/1${surl}`, { jar });
-    const html = await page.text();
-    const pick = (re) => { const m = html.match(re); return m ? m[1] : ''; };
-    const meta = {
-      surl,
-      uk: pick(/"share_uk":(\d+)/) || pick(/"uk":(\d+)/),
-      shareid: pick(/"shareid":(\d+)/),
-      sign: pick(/"sign":"([^"]+)"/),
-      timestamp: pick(/"timestamp":(\d+)/),
+    const pickFrom = (html) => {
+      const pick = (re) => { const m = html.match(re); return m ? m[1] : ''; };
+      return {
+        // 2026-11 改版：share_uk 改成带引号的字符串，数字/字符串两种写法都认（issue #3）
+        uk: pick(/"share_uk":"?(\d+)"?/) || pick(/"uk":"?(\d+)"?/),
+        shareid: pick(/"shareid":(\d+)/),
+        sign: pick(/"sign":"([^"]+)"/),
+        timestamp: pick(/"timestamp":(\d+)/),
+        bdstoken: pick(/"bdstoken":"([0-9a-f]+)"/),
+      };
     };
-    if (!meta.shareid) throw new Error('分享页没读到 shareid：链接失效、被取消，或百度改版了分享页结构');
+    const page = await req(`https://pan.baidu.com/s/1${surl}`, { jar });
+    const meta = { surl, ...pickFrom(await page.text()) };
     const v = await reqJson(`https://pan.baidu.com/share/verify?surl=${surl}&channel=chunlei&web=1&app_id=250528&clienttype=0`, {
       method: 'POST', jar,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: `https://pan.baidu.com/s/1${surl}` },
@@ -134,6 +138,14 @@ const bd = {
     const randsk = jar.get('BDCLND');
     if (!randsk) throw new Error('验证通过但没拿到 randsk（BDCLND），百度流程有变');
     meta.randsk = decodeURIComponent(randsk);
+    // 带提取码的分享第一次 GET 落在提码页（/share/init），落地页里没有 share_uk/bdstoken；
+    // verify 通过后重取一次分享页，以第二次读到的值为准（issue #3 复现报告口径）。
+    try {
+      const page2 = await req(`https://pan.baidu.com/s/1${surl}`, { jar });
+      const m2 = pickFrom(await page2.text());
+      for (const k of ['uk', 'shareid', 'sign', 'timestamp', 'bdstoken']) if (m2[k]) meta[k] = m2[k];
+    } catch (e) { /* 重取失败不致命：用第一次页面的值继续 */ }
+    if (!meta.shareid) throw new Error('分享页没读到 shareid：链接失效、被取消，或百度改版了分享页结构');
     meta.jar = jar.str();
     return meta;
   },
@@ -148,11 +160,24 @@ const bd = {
       const b = String((cred && cred.bduss) || '').trim();
       if (b) jar.map.set('BDUSS', b);
     }
-    const api = `https://pan.baidu.com/share/list?app_id=250528&channel=chunlei&clienttype=0&web=1`
-      + `&uk=${meta.uk}&shareid=${meta.shareid}&order=other&desc=1&showempty=0&page=1&num=100`
-      + `&dir=${encodeURIComponent(dir)}&sekey=${encodeURIComponent(meta.randsk)}`;
-    const r = await reqJson(api, { jar, headers: { Referer: 'https://pan.baidu.com/' } });
-    if (!r.data || r.data.errno !== 0) throw new Error(fmtErr('列目录失败', r.data, { '-9': '目录不存在或凭证失效' }));
+    let r;
+    if (meta.bdstoken) {
+      // 2026-11 改版新口径（issue #3）：shorturl + bdstoken + root/dir；老 uk+shareid+sekey
+      // 口径已被上游废弃（实测返回 -7/2）。参数顺序与浏览器抓包一致（含 web=5 与 web=1 并存）。
+      const q = `shorturl=${meta.surl}&web=5&app_id=250528&desc=1&showempty=0&page=1&num=100&order=time`
+        + (dir === '/' ? '&root=1' : `&root=0&dir=${encodeURIComponent(dir)}`)
+        + `&view_mode=1&channel=chunlei&web=1&bdstoken=${meta.bdstoken}&logid=&clienttype=0`;
+      r = await reqJson(`https://pan.baidu.com/share/list?${q}`, {
+        jar, headers: { 'X-Requested-With': 'XMLHttpRequest', Referer: `https://pan.baidu.com/s/1${meta.surl}` },
+      });
+    } else {
+      // 兜底：页面没读到 bdstoken 时退回老口径（旧页结构若恢复仍可用）
+      const api = `https://pan.baidu.com/share/list?app_id=250528&channel=chunlei&clienttype=0&web=1`
+        + `&uk=${meta.uk}&shareid=${meta.shareid}&order=other&desc=1&showempty=0&page=1&num=100`
+        + `&dir=${encodeURIComponent(dir)}&sekey=${encodeURIComponent(meta.randsk)}`;
+      r = await reqJson(api, { jar, headers: { Referer: 'https://pan.baidu.com/' } });
+    }
+    if (!r.data || r.data.errno !== 0) throw new Error(fmtErr('列目录失败', r.data, { '-9': '目录不存在或凭证失效', '-7': '链接出错（分享不存在、已失效或已被取消）' }));
     const files = (r.data.list || []).map(f => ({
       id: String(f.fs_id), name: f.server_filename, size: f.size || 0,
       dir: f.isdir === 1 || f.isdir === '1', path: f.path,
