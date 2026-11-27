@@ -243,7 +243,7 @@ url = finalUrl;
 m = url.match(/\/(video|note)\/(\d+)/);
 if (m) { kind = m[1]; id = m[2]; }
 }
-if (!id) throw new Error('没认出抖音作品（需要 v.douyin.com 短链或 douyin.com/video/ 长链）');
+if (!id) throw new Error(/v\.douyin\.com/.test(rawUrl) ? '抖音短链没跳转到作品页（多半被抖音拦了验证页），换条链接或稍后再试' : '没认出抖音作品（需要 v.douyin.com 短链或 douyin.com/video/ 长链）');
 const pageUrl = `https://www.iesdouyin.com/share/${kind === 'note' ? 'note' : 'video'}/${id}/`;
 let item = null, route = '分享页 _ROUTER_DATA';
 {
@@ -308,7 +308,7 @@ landedUrl = finalUrl;
 m = finalUrl.match(/short-video\/([0-9a-zA-Z_-]+)/) || finalUrl.match(/fw\/photo\/([0-9a-zA-Z_-]+)/) || finalUrl.match(/[?&]photoId=([0-9a-zA-Z_-]+)/);
 if (m) photoId = m[1];
 }
-if (!photoId) throw new Error('没认出快手作品（需要 v.kuaishou.com 短链或 short-video 长链）');
+if (!photoId) throw new Error(/v\.kuaishou\.com/.test(rawUrl) ? '快手短链没跳转到作品页（多半被快手拦了验证页），换条链接或稍后再试' : '没认出快手作品（需要 v.kuaishou.com 短链或 short-video 长链）');
 const candUrls = [];
 if (landedUrl && landedUrl.includes('/fw/photo/')) candUrls.push(landedUrl);
 candUrls.push(`https://www.kuaishou.com/fw/photo/${photoId}`, `https://m.gifshow.com/fw/photo/${photoId}`);
