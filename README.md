@@ -591,7 +591,7 @@ fetch('/api/owner', { method: 'POST', headers: { 'Content-Type': 'application/js
 | netdisk-fast-download（NFD） | [qaiu/netdisk-fast-download](https://github.com/qaiu/netdisk-fast-download) | [nfd-parser.github.io](https://nfd-parser.github.io) | 夸克/UC/蓝奏/小飞机/123 口径对照 |
 | OpenList | [OpenListTeam/OpenList](https://github.com/OpenListTeam/OpenList) | [文档 doc.oplist.org](https://doc.oplist.org) | 123 开放平台口径与各驱动实现对照 |
 | xiaoya-alist | [DDS-Derek/xiaoya-alist](https://github.com/DDS-Derek/xiaoya-alist) | — | 夸克扫码登录的二维码内容格式（久经验证的实现） |
-| feijipan-api | [markcxx/feijipan-api](https://github.com/markcxx/feijipan-api) | [feijipan-api.vercel.app](https://feijipan-api.vercel.app) | 小飞机网盘接口对照 |
+| feijipan-api | markcxx/feijipan-api（原仓库与演示站均已下线，链接失效） | — | 小飞机网盘接口对照（开发时参考） |
 | MediaGet | [hotier/MediaGet](https://github.com/hotier/MediaGet) | [get.hotier.de5.net](https://get.hotier.de5.net) | 视频解析口径主对照（其仓库 API.md） |
 | media-parser | [ucmao/media-parser](https://github.com/ucmao/media-parser) | — | 视频口径对照（快手等平台） |
 | short_videos | [jiuhunwl/short_videos](https://github.com/jiuhunwl/short_videos) | — | 视频口径对照（抖音等平台） |
