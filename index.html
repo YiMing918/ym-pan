@@ -622,7 +622,7 @@ $('#inUrl').addEventListener('input', e=>{
   if(pwd && !$('#inPwd').value) $('#inPwd').value=pwd;
 });
 $('#btnParse').onclick=async()=>{
-  const raw=$('#inUrl').value.trim(); if(!raw){ toast('先粘贴分享链接'); return; }
+  const raw=$('#inUrl').value.trim(); if(!raw){ toast('先粘贴分享链接'); msg('',''); return; }
   const { url, pwd } = extractFromText(raw);
   const d = detectDrive(url); if(d) state.drive=d;
   state.stack=[]; msg('',''); clearDiag(); $('#listWrap').style.display='none'; $('#linkWrap').style.display='none';
@@ -960,7 +960,7 @@ $('#btnVideo').onclick=async()=>{
     }
     $('#vEmbed').style.display='none';
   }catch(e){ vmsg('err','网络错误：'+e.message); }
-  btn.disabled=false;
+  finally{ btn.disabled=false; }
 };
 $('#inVUrl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#btnVideo').click(); });
 </script>
