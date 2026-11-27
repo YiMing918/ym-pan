@@ -2,7 +2,7 @@
 
 把网盘分享链接解析成**真实直链**，交给 1DM+、ADM、aria2 等下载器下载；另带短视频去水印解析。部署在 Cloudflare Pages + Functions，免费额度内运行，**跟着本文一步一步做就能部署出你自己的一个站**。
 
-![Version](https://img.shields.io/badge/版本-v1.9.12-blue) ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020) ![License](https://img.shields.io/badge/license-MIT-green) ![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue) ![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4) ![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
+![Version](https://img.shields.io/badge/版本-v1.9.13-blue) ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages%20%2B%20Functions-f38020) ![License](https://img.shields.io/badge/license-MIT-green) ![Drives](https://img.shields.io/badge/%E7%BD%91%E7%9B%98-11%20%E5%AE%B6-blue) ![Video](https://img.shields.io/badge/%E8%A7%86%E9%A2%91%E8%A7%A3%E6%9E%90-9%20%E5%B9%B3%E5%8F%B0-ff69b4) ![Price](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%86%85-brightgreen)
 
 **[下载最新版](https://github.com/YiMing918/ym-pan/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-pan-guide)**
 
@@ -873,6 +873,7 @@ README.md                   你正在看的这份
 
 ## 版本历史
 
+- **v1.9.13（2026-11-27）**：逐按钮实测修三处。① 短视频解析一报错，「解析」按钮就永久变灰、必须刷新页面才能再用——恢复按钮的代码被失败分支的提前返回跳过了，改走 finally 必达（主解析按钮本来就是这个写法）。② 主解析框里链接为空时点解析，旧的红色报错条不再残留。③ 抖音/快手短链被平台拦了验证页、没跳到作品页时，不再误报「需要短链」（链接本来就是短链），改成如实说明。
 - **v1.9.12（2026-11-27）**：百度分享改版适配（issue #3）：share_uk 改成带引号的字符串后旧正则取不到、老列目录口径（uk+shareid+sekey）被上游废弃。列目录换新口径（shorturl + bdstoken + root/dir），verify 通过后重取一次分享页拿 share_uk/bdstoken，share_uk 正则兼容数字/字符串两种写法；页面没读到 bdstoken 时自动退回老口径。取直链暂未恢复：百度把 sharedownload 的响应改成了加密串，且新参数 jsToken、path_list 前缀的来源尚未定位，进展见 issue #3。
 - **v1.9.11（2026-11-26）**：健康自检加一次重试。v1.9.10 的复查确认上线后，看门狗首轮的「接口不通」名单仍几乎每次换人——实测健康接口连查三次，小飞机、天翼轮流误报，但各家解析本身一直正常：单次探测从 CF 边缘连国内接口偶有连接抖动，一探定罪太脆。现每家探测失败隔 1.5 秒重试一次，两次都失败才报不通；与看门狗的复查确认叠加，真宕机要连过四关才会漏报，反之误报基本绝迹。
 - **v1.9.10（2026-11-26）**：看门狗加复查确认。v1.9.9 修掉小飞机后，看门狗仍会红——剩下的是国内网盘接口经海外节点访问的超时抖动（接口不通名单几乎每天换人、迅雷探针偶发超时），一轮定罪等于天天发失败邮件、真故障被淹没。现首轮有异常时隔 90 秒整轮复查，只保留两轮都复现的异常，只出现一轮的降为备注留痕（首轮明细一并写入报告，不静默吞掉）；真故障每轮必现，不会被复查放过。
